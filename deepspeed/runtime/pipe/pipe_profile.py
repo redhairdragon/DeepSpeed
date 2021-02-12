@@ -21,14 +21,14 @@ class PipelineProfiler:
         def start(self):
             """Start the timer."""
             assert not self.started_, 'timer has already been started'
-            torch.cuda.synchronize()
+            # torch.cuda.synchronize()
             self.start_ = time.time()
             self.started_ = True
 
         def stop(self):
             """Stop the timer."""
             assert self.started_, 'timer is not started'
-            torch.cuda.synchronize()
+            # torch.cuda.synchronize()
             self.end_ = time.time()
             self.started_ = False
 
