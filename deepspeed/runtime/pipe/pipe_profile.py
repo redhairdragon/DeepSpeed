@@ -74,7 +74,7 @@ class PipelineProfiler:
     def stop(self, key):
         """Stop the timer."""
         assert key in self.timers
-        assert self.timers[key].started
+        assert self.timers[key].started_
         self.records.append(str(self.timers[key]))
         del self.timers[key]
         if len(self.records) == self.write_to_disk_entries:
