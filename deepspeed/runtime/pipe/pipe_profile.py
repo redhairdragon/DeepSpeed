@@ -51,8 +51,9 @@ class PipelineProfiler:
         self.timers = dict()
         self.records = list()
         self.write_to_disk_entries = write_to_disk_entries_
-        self.filename = "pipeline_profile_log" + \
-            datetime.now().strftime("%m-%d-%Y-%H:%M:%S")
+        self.filename = "pipeline_profile_log"
+        # +datetime.now().strftime("%m-%d-%Y-%H:%M:%S")
+
         # create empty file
         file_creator = open(self.filename, "w")
         file_creator.close()
