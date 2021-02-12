@@ -10,7 +10,8 @@ response = client.describe_instances(
 private_ips = []
 for insts in response['Reservations']:
     for inst in insts["Instances"]:
-        private_ips.append(inst["PrivateIpAddress"])
+        if "PrivateIpAddress" in inst:
+            private_ips.append(inst["PrivateIpAddress"])
 with open("hostfile", "w") as f:
     for ip in private_ips:
         f.write("ubuntu@"+ip+"\n")
