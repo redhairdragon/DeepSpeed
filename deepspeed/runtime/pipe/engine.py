@@ -1189,7 +1189,7 @@ class PipelineEngine(DeepSpeedEngine):
         for step_cmds in pipe_schedule:
             # For each instruction in the step
             for cmd in step_cmds:
-                self.pipe_profiler.start(type(cmd), self.global_steps)
+                self.pipe_profiler.start(type(cmd).__name__, self.global_steps)
                 if type(cmd) not in self._INSTRUCTION_MAP:
                     raise RuntimeError(
                         f'{self.__class__.__name__} does not understand instruction {repr(cmd)}'
@@ -1199,7 +1199,7 @@ class PipelineEngine(DeepSpeedEngine):
                 self._exec_instr = MethodType(
                     self._INSTRUCTION_MAP[type(cmd)], self)
                 self._exec_instr(**cmd.kwargs)
-                self.pipe_profiler.stop(type(cmd))
+                self.pipe_profiler.stop(type(cmd).__name__)
 
     def set_batch_fn(self, fn):
         """Execute a post-processing function on input data.
