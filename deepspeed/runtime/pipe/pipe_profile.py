@@ -81,5 +81,5 @@ class PipelineProfiler:
         if len(self.records) == self.write_to_disk_entries:
             with open(self.filename, "a") as file_appender:
                 file_appender.write("\n".join(self.records))
-            file_appender.write("\n")
+                file_appender.write("\n")
             self.records = list()
