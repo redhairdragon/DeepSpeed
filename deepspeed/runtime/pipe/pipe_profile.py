@@ -2,6 +2,8 @@ import time
 import torch
 import json
 from datetime import datetime
+import os.path
+from os import path
 
 # Modified SynchronizedWallClockTimer
 
@@ -28,7 +30,7 @@ class PipelineProfiler:
         def stop(self):
             """Stop the timer."""
             assert self.started_, 'timer is not started'
-            # torch.cuda.synchronize()
+            # torch.cuda.synchronize_checkpoint_boundary()
             self.end_ = time.time()
             self.started_ = False
 
@@ -55,8 +57,9 @@ class PipelineProfiler:
         # +datetime.now().strftime("%m-%d-%Y-%H:%M:%S")
 
         # create empty file
-        file_creator = open(self.filename, "w")
-        file_creator.close()
+        if not path.exists(self.filename):
+            file_creator = open(self.filename, "w")
+            file_creator.close()
 
     # content -> dict
     def write_metadata(self, content):

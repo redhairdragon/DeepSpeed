@@ -1146,9 +1146,9 @@ class PipelineEngine(DeepSpeedEngine):
         assert isinstance(self.module, PipelineModule)
         assert self._curr_ckpt_path is not None, \
             "PipelineEngine expects module_state_dict() to be called from save_checkpoint()"
-        print("**********[DEEPSPEED module_state_dict]**********************")
+        self.pipe_profiler.start("Save Checkpoint", self.global_steps)
         self.module.save_state_dict(self._curr_ckpt_path)
-
+        self.pipe_profiler.stop("Save Checkpoint")
         return None
 
     def load_module_state_dict(self, state_dict, strict=True):
@@ -1162,14 +1162,15 @@ class PipelineEngine(DeepSpeedEngine):
             state_dict (str, None): unused
             strict (bool, optional): Strict state loading. Defaults to True.
         """
-        print(
-            "**********[DEEPSPEED load_module_state_dict]**********************")
+        self.pipe_profiler.start("Load Checkpoint", self.global_steps)
         if (state_dict is not None) and (not isinstance(state_dict, str)):
             super().load_module_state_dict(state_dict, strict)
+            self.pipe_profiler.stop("Load Checkpoint")
             return
 
         self.module.load_state_dir(
             load_dir=self._curr_ckpt_path, strict=strict)
+        self.pipe_profiler.stop("Load Checkpoint")
 
     # A map of PipeInstruction types to methods. Each method will be executed with the
     # kwargs provided to the PipeInstruction from the scheduler.
