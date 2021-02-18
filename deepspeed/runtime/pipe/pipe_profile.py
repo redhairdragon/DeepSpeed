@@ -49,11 +49,11 @@ class PipelineProfiler:
             cls._instance = object.__new__(cls, *args, **kwargs)
         return cls._instance
 
-    def __init__(self, write_to_disk_entries_=50):
+    def __init__(self, ckpt_path="", write_to_disk_entries_=50):
         self.timers = dict()
         self.records = list()
         self.write_to_disk_entries = write_to_disk_entries_
-        self.filename = "pipeline_profile_log"
+        self.filename = "pipeline_profile_log"+ckpt_path
         # +datetime.now().strftime("%m-%d-%Y-%H:%M:%S")
 
         # create empty file

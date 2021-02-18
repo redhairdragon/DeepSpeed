@@ -201,7 +201,7 @@ class PipelineEngine(DeepSpeedEngine):
             self.timers('step_microstep').start()
             self.timers('step_microstep').stop()
 
-        self.pipe_profiler = PipelineProfiler()
+        self.pipe_profiler = PipelineProfiler(ckpt_path=self._curr_ckpt_path)
         self.pipe_profiler.write_metadata({
             "micro_batch_size": self.micro_batch_size,
             "global_rank": self.global_rank
