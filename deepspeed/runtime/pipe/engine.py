@@ -1146,8 +1146,9 @@ class PipelineEngine(DeepSpeedEngine):
         assert isinstance(self.module, PipelineModule)
         assert self._curr_ckpt_path is not None, \
             "PipelineEngine expects module_state_dict() to be called from save_checkpoint()"
-
+        print("**********[DEEPSPEED module_state_dict]**********************")
         self.module.save_state_dict(self._curr_ckpt_path)
+
         return None
 
     def load_module_state_dict(self, state_dict, strict=True):
@@ -1161,6 +1162,8 @@ class PipelineEngine(DeepSpeedEngine):
             state_dict (str, None): unused
             strict (bool, optional): Strict state loading. Defaults to True.
         """
+        print(
+            "**********[DEEPSPEED load_module_state_dict]**********************")
         if (state_dict is not None) and (not isinstance(state_dict, str)):
             super().load_module_state_dict(state_dict, strict)
             return
