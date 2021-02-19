@@ -87,3 +87,7 @@ class PipelineProfiler:
                 file_appender.write("\n".join(self.records))
                 file_appender.write("\n")
             self.records = list()
+
+    def setIteration(self, key, iter):
+        assert key in self.timers
+        self.timers[key].iter_ = iter

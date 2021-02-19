@@ -1165,11 +1165,14 @@ class PipelineEngine(DeepSpeedEngine):
         self.pipe_profiler.start("Load Checkpoint", self.global_steps)
         if (state_dict is not None) and (not isinstance(state_dict, str)):
             super().load_module_state_dict(state_dict, strict)
+            self.pipe_profiler.setIteration(
+                "Load Checkpoint", self.global_steps)
             self.pipe_profiler.stop("Load Checkpoint")
             return
 
         self.module.load_state_dir(
             load_dir=self._curr_ckpt_path, strict=strict)
+        self.pipe_profiler.setIteration("Load Checkpoint", self.global_steps)
         self.pipe_profiler.stop("Load Checkpoint")
 
     # A map of PipeInstruction types to methods. Each method will be executed with the
