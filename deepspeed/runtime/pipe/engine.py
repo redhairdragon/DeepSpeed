@@ -1167,7 +1167,6 @@ class PipelineEngine(DeepSpeedEngine):
             super().load_module_state_dict(state_dict, strict)
             self.pipe_profiler.setIteration(
                 "Load Checkpoint", self.global_steps)
-            print("*****************:" + str(self.global_steps))
             self.pipe_profiler.stop("Load Checkpoint")
             return
 
@@ -1175,8 +1174,6 @@ class PipelineEngine(DeepSpeedEngine):
             load_dir=self._curr_ckpt_path, strict=strict)
         self.pipe_profiler.setIteration(
             "Load Checkpoint", self.global_steps)
-        print("**************---:" + str(self.global_steps))
-
         self.pipe_profiler.stop("Load Checkpoint")
 
     # A map of PipeInstruction types to methods. Each method will be executed with the
