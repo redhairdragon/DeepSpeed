@@ -1143,6 +1143,8 @@ class PipelineEngine(DeepSpeedEngine):
         Returns:
             None
         """
+        print("*******PIPE:module_state_dict****")
+
         assert isinstance(self.module, PipelineModule)
         assert self._curr_ckpt_path is not None, \
             "PipelineEngine expects module_state_dict() to be called from save_checkpoint()"
