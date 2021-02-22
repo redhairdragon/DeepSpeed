@@ -1586,6 +1586,8 @@ class DeepSpeedEngine(Module):
             'mp_world_size':
             self.mp_world_size
         }
+        print("*************state['optimizer']*********")
+        print(state['optimizer'])
         state.update(client_state)
 
         log_dist(message=f'Saving model checkpoint: {save_path}', ranks=[0])
