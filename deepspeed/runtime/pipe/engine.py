@@ -563,7 +563,8 @@ class PipelineEngine(DeepSpeedEngine):
     def _exec_backward_pass(self, buffer_id):
         assert self.optimizer is not None, "must provide optimizer during " \
                                            "init in order to use backward"
-
+        print("*************self.optimizer*************")
+        print(self.optimizer)
         self.mem_status('BEFORE BWD', reset_max=True)
 
         # The last stage just runs backward on the loss using DeepSpeed's typical
