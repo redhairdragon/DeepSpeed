@@ -895,7 +895,7 @@ class FP16_DeepSpeedZeroOptimizer_Stage1(object):
             checkpoint['optimizer'] = optimizer.state_dict()
             torch.save(checkpoint, "saved.pth")
         """
-        print("*******state_dict STAGE2 ****")
+        # print("*******state_dict STAGE2 ****")
 
         if self.elastic_checkpoint:
             return self._elastic_state_dict()

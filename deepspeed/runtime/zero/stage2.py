@@ -1722,7 +1722,7 @@ class FP16_DeepSpeedZeroOptimizer(object):
             checkpoint['optimizer'] = optimizer.state_dict()
             torch.save(checkpoint, "saved.pth")
         """
-        print("*******state_dict STAGE2 ****")
+        # print("*******state_dict STAGE2 ****")
 
         state_dict = {}
         state_dict['loss_scaler'] = self.loss_scaler
