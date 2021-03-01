@@ -31,7 +31,7 @@ ds_only=0
 local_only=0
 pip_sudo=0
 entire_dlts_job=1
-hostfile=/job/hostfile
+hostfile=hostfile
 pip_mirror=""
 skip_requirements=0
 allow_sudo=0
@@ -140,9 +140,9 @@ else
 fi
 
 if [ "$pip_mirror" != "" ]; then
-    PIP_INSTALL="pip install $VERBOSE $PIP_VERBOSE -i $pip_mirror"
+    PIP_INSTALL="pip3 install $VERBOSE -i $pip_mirror"
 else
-    PIP_INSTALL="pip install $VERBOSE $PIP_VERBOSE"
+    PIP_INSTALL="pip3 install $VERBOSE"
 fi
 
 
@@ -152,11 +152,11 @@ if [ ! -f $hostfile ]; then
 fi
 
 echo "Building deepspeed wheel"
-python setup.py $VERBOSE bdist_wheel
+python3 setup.py $VERBOSE bdist_wheel
 
 if [ "$local_only" == "1" ]; then
     echo "Installing deepspeed"
-    $PIP_SUDO pip uninstall -y deepspeed
+    $PIP_SUDO pip3 uninstall -y deepspeed
     $PIP_SUDO $PIP_INSTALL dist/deepspeed*.whl
     ds_report
 else
@@ -174,7 +174,7 @@ else
     pdcp -w $hosts requirements/requirements.txt ${tmp_wheel_path}/
 
     echo "Installing deepspeed"
-    pdsh -w $hosts "$PIP_SUDO pip uninstall -y deepspeed"
+    pdsh -w $hosts "$PIP_SUDO pip3 uninstall -y deepspeed"
     pdcp -w $hosts dist/deepspeed*.whl $tmp_wheel_path/
     pdsh -w $hosts "$PIP_SUDO $PIP_INSTALL $tmp_wheel_path/deepspeed*.whl"
     pdsh -w $hosts "ds_report"
