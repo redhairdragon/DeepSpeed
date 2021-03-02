@@ -368,6 +368,8 @@ class PipelineModule(nn.Module):
                 else:
                     # x = exec_range_func(start_idx, end_idx)(*x)
                     x = exec_range_func(start_idx, end_idx, True)(*x)
+                    print(x)
+                    x = x[0]
         return x
 
     def _partition_layers(self, method='uniform'):
