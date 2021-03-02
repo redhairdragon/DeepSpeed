@@ -152,7 +152,7 @@ class PipelineEngine(DeepSpeedEngine):
             'labels': [],   # labels from batch input
             'outputs': [],  # activations
             'output_tensors': [],  # tensor object to preserve backward graph
-            'layer_output': [] # Output of each
+            'layer_output': []  # Output of each
         }
         self.pipe_recv_buf = None
         self.grad_layer = None
