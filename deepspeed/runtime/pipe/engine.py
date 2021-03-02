@@ -31,6 +31,10 @@ LOG_STAGE = -2
 DATA_PARALLEL_ID = -2
 
 
+# REMAPPING
+NUM_MOVING_LAYER = 3
+
+
 def is_even(number):
     return number % 2 == 0
 
@@ -148,6 +152,7 @@ class PipelineEngine(DeepSpeedEngine):
             'labels': [],   # labels from batch input
             'outputs': [],  # activations
             'output_tensors': [],  # tensor object to preserve backward graph
+            'layer_output': [] # Output of each
         }
         self.pipe_recv_buf = None
         self.grad_layer = None
@@ -445,9 +450,6 @@ class PipelineEngine(DeepSpeedEngine):
         if self.is_first_stage() or self.is_last_stage():
             self.training_dataloader = None
             self.data_iterator = iterator
-
-    def set_batch_fn(self, fn):
-        self.batch_fn = fn
 
     def is_gradient_accumulation_boundary(self):
         """True if the engine is executing a gradient reduction or optimizer step instruction.
@@ -1217,3 +1219,37 @@ class PipelineEngine(DeepSpeedEngine):
             fn (function): The function to run.
         """
         self.batch_fn = fn
+
+    def remapping_layer(self, from_rank, to_rank):
+        if self.global_rank == from_rank:
+            # Sending and Removing computed data
+            for key in self.pipe_buffers:
+                # inputs -> batch input and received activations, ,,
+                # labels -> labels
+                # outputs -> activations
+                # output_tensors -> tensor object to preserve backward graph
+
+                # let us first send out data
+                for _ in range(NUM_MOVING_LAYER):
+                    p2p.send(self.pipe_buffers[key][0], to_rank)
+                    self.pipe_buffers[key].pop(0)
+
+            # input
+            # activation
+            # gradient
+            # Removing Model related
+            # layer
+            # parameter
+
+        if self.global_rank == to_rank:
+            # Receiving computed data
+            for key in self.pipe_buffers:
+                for _ in range(NUM_MOVING_LAYER):
+                    # p2p.recv(self.pipe_buffers[key])
+                    pass
+            # input
+            # activation
+            # gradient
+            # Adding corresponding model
+            # layer
+            # parameter

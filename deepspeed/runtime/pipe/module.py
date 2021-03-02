@@ -42,13 +42,15 @@ class LayerSpec:
             LayerSpec(torch.nn.Linear, self.hidden_hidden, self.out_dim)]
         ]
     """
+
     def __init__(self, typename, *module_args, **module_kwargs):
         self.typename = typename
         self.module_args = module_args
         self.module_kwargs = module_kwargs
 
         if not issubclass(typename, nn.Module):
-            raise RuntimeError('LayerSpec only supports torch.nn.Module types.')
+            raise RuntimeError(
+                'LayerSpec only supports torch.nn.Module types.')
 
         if dist.is_initialized():
             self.global_rank = dist.get_rank()
@@ -160,7 +162,8 @@ class PipelineModule(nn.Module):
                         f'num_stages ({self.num_stages}) must divide distributed world size ({self.world_size})'
                     )
                 dp = self.world_size // num_stages
-                topology = PipeDataParallelTopology(num_pp=num_stages, num_dp=dp)
+                topology = PipeDataParallelTopology(
+                    num_pp=num_stages, num_dp=dp)
                 self._topo = topology
 
         # Contruct communicators for pipeline topology
@@ -182,9 +185,9 @@ class PipelineModule(nn.Module):
 
         # Offset the random seed by the stage ID.
         #newseed = torch.cuda.initial_seed() + self._grid.get_stage_id()
-        #ds_utils.set_random_seed(newseed)
+        # ds_utils.set_random_seed(newseed)
 
-        #with torch.random.fork_rng(devices=[torch.cuda.current_device()]):
+        # with torch.random.fork_rng(devices=[torch.cuda.current_device()]):
         self._build()
         self.to('cuda')
 
@@ -207,7 +210,8 @@ class PipelineModule(nn.Module):
 
             # Recursively build PipelineModule objects
             if isinstance(layer, PipelineModule):
-                raise NotImplementedError('RECURSIVE BUILD NOT YET IMPLEMENTED')
+                raise NotImplementedError(
+                    'RECURSIVE BUILD NOT YET IMPLEMENTED')
 
             # LayerSpec objects contain an nn.Module that should be allocated now.
             elif isinstance(layer, nn.Module):
@@ -295,30 +299,50 @@ class PipelineModule(nn.Module):
         # will see a different offset.
         self.micro_offset += 1
 
-        def exec_range_func(start, end):
+        def exec_range_func(start, end, save_layer_outputs=False):
             ''' Helper function to be used with checkpoint()
             Adapted from torch.utils.checkpoint:checkpoint_sequential()
             '''
             local_micro_offset = self.micro_offset + 1
+            if save_layer_outputs:
+                def exec_func(*inputs):
+                    # Single tensor inputs need to be unwrapped
+                    if len(inputs) == 1:
+                        inputs = inputs[0]
+                    for idx, layer in enumerate(self.forward_funcs[start:end]):
+                        self.curr_layer = idx + self._local_start
+                        if self.seed_layers:
+                            new_seed = (self.base_seed *
+                                        local_micro_offset) + self.curr_layer
+                            if self.seed_fn:
+                                self.seed_fn(new_seed)
+                            else:
+                                ds_utils.set_random_seed(new_seed)
 
-            def exec_func(*inputs):
-                # Single tensor inputs need to be unwrapped
-                if len(inputs) == 1:
-                    inputs = inputs[0]
-                for idx, layer in enumerate(self.forward_funcs[start:end]):
-                    self.curr_layer = idx + self._local_start
-                    if self.seed_layers:
-                        new_seed = (self.base_seed *
-                                    local_micro_offset) + self.curr_layer
-                        if self.seed_fn:
-                            self.seed_fn(new_seed)
-                        else:
-                            ds_utils.set_random_seed(new_seed)
+                        inputs = layer(inputs)
+                    return inputs
+                return exec_func
+            else:  # save_layer_outputs = False
+                def exec_func(*inputs):
+                    layer_outputs = []
+                    # Single tensor inputs need to be unwrapped
+                    if len(inputs) == 1:
+                        inputs = inputs[0]
+                    for idx, layer in enumerate(self.forward_funcs[start:end]):
+                        self.curr_layer = idx + self._local_start
+                        if self.seed_layers:
+                            new_seed = (self.base_seed *
+                                        local_micro_offset) + self.curr_layer
+                            if self.seed_fn:
+                                self.seed_fn(new_seed)
+                            else:
+                                ds_utils.set_random_seed(new_seed)
 
-                    inputs = layer(inputs)
-                return inputs
-
-            return exec_func
+                        inputs = layer(inputs)
+                        # This will increase memory usage.
+                        layer_outputs.append(inputs)
+                    return (inputs, layer_outputs)
+                return exec_func
 
         if self.activation_checkpoint_interval == 0:
             func = exec_range_func(0, len(self.forward_funcs))
@@ -342,7 +366,8 @@ class PipelineModule(nn.Module):
                                         end_idx),
                         *x)
                 else:
-                    x = exec_range_func(start_idx, end_idx)(*x)
+                    # x = exec_range_func(start_idx, end_idx)(*x)
+                    x = exec_range_func(start_idx, end_idx, True)(*x)
         return x
 
     def _partition_layers(self, method='uniform'):
@@ -372,9 +397,11 @@ class PipelineModule(nn.Module):
                 self.parts = ds_utils.partition_balanced(weights=binary_weights,
                                                          num_parts=num_stages)
         elif method == 'profile':
-            raise NotImplementedError(f'Partitioning method {method} not implemented.')
+            raise NotImplementedError(
+                f'Partitioning method {method} not implemented.')
         else:
-            raise NotImplementedError(f'Partitioning method {method} not implemented.')
+            raise NotImplementedError(
+                f'Partitioning method {method} not implemented.')
 
         # Print some information on the partitioning.
         if self.global_rank == 0:
@@ -400,7 +427,8 @@ class PipelineModule(nn.Module):
                 except AttributeError:
                     print(f'  loss: {self.loss_fn.__class__.__name__}')
 
-        self._set_bounds(start=self.parts[stage_id], stop=self.parts[stage_id + 1])
+        self._set_bounds(
+            start=self.parts[stage_id], stop=self.parts[stage_id + 1])
 
     def allreduce_tied_weight_gradients(self):
         '''All reduce the gradients of the tied weights between tied stages'''
@@ -515,9 +543,11 @@ class PipelineModule(nn.Module):
         # Data parallelism is omitted from the naming convention because we are agnostic
         # to this in the checkpoint.
         omit_dims = frozenset(['data'])
-        axes = [a for a in self._grid._topo.get_axis_names() if a not in omit_dims]
+        axes = [a for a in self._grid._topo.get_axis_names()
+                if a not in omit_dims]
         for dim in axes:
-            rank = getattr(self._grid._topo.get_coord(rank=self.global_rank), dim)
+            rank = getattr(self._grid._topo.get_coord(
+                rank=self.global_rank), dim)
             rank_name += f'-{dim}_{rank:02d}'
 
         ckpt_name = os.path.join(checkpoints_path, str(tag), rank_name)
@@ -571,5 +601,6 @@ class PipelineModule(nn.Module):
             return all('ParallelTransformerLayerPipe' in f.__class__.__name__
                        for f in funcs)
 
-        params = [f.parameters() for f in funcs if isinstance(f, torch.nn.Module)]
+        params = [f.parameters()
+                  for f in funcs if isinstance(f, torch.nn.Module)]
         return any(len(list(p)) > 0 for p in params)
