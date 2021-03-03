@@ -5,6 +5,7 @@ import re as regex
 
 from collections import defaultdict
 from functools import partial
+from typing import OrderedDict
 
 import torch
 import torch.nn as nn
@@ -197,6 +198,31 @@ class PipelineModule(nn.Module):
         self.activation_checkpoint_interval = activation_checkpoint_interval
         self.activation_checkpoint_func = activation_checkpoint_func
 
+        print("------------")
+        for module in self.named_modules():
+            print(module)
+            # print(module[1].state_dict())
+            # break
+
+        # a = None
+        # for c in self.children():
+        #     a: OrderedDict = c.state_dict()
+        #     print(c.state_dict())
+        #     break
+        # a['embed.word_embeddings.weight'] = torch.zeros_like(
+        #     a['embed.word_embeddings.weight'])
+        # # print(a['embed.word_embeddings.weight'])
+        # for c in self.children():
+        #     c.load_state_dict(a)
+        #     print(c.state_dict())
+        #     break
+
+        print("------------")
+        exit()
+
+        # index->layer
+        self.layerwise_output = [list()*len(self.forward_funcs)]
+
     def _build(self):
         specs = self._layer_specs
 
@@ -293,6 +319,9 @@ class PipelineModule(nn.Module):
                 f"Partitioning '{layername}' found no valid layers to partition.")
         return idxs
 
+    def reset_layerwise_output(self):
+        self.layerwise_output = [list()*len(self.forward_funcs)]
+
     def forward(self, forward_input):
         # We need to offset the seed by the microbatch ID. Save it in a local var to
         # ensure it is preserved in the closure. Otherwise checkpointed forward funcs
@@ -320,48 +349,10 @@ class PipelineModule(nn.Module):
                             ds_utils.set_random_seed(new_seed)
 
                     inputs = layer(inputs)
+                    if save_layer_outputs:
+                        self.layerwise_output[idx].append(inputs)
                 return inputs
             return exec_func
-
-            if save_layer_outputs:
-                def exec_func(*inputs):
-                    layer_outputs = []
-                    # Single tensor inputs need to be unwrapped
-                    if len(inputs) == 1:
-                        inputs = inputs[0]
-                    for idx, layer in enumerate(self.forward_funcs[start:end]):
-                        self.curr_layer = idx + self._local_start
-                        if self.seed_layers:
-                            new_seed = (self.base_seed *
-                                        local_micro_offset) + self.curr_layer
-                            if self.seed_fn:
-                                self.seed_fn(new_seed)
-                            else:
-                                ds_utils.set_random_seed(new_seed)
-
-                        inputs = layer(inputs)
-                        # This will increase memory usage.
-                        layer_outputs.append(inputs)
-                    return (inputs, layer_outputs)
-                return exec_func
-            else:  # save_layer_outputs = False
-                def exec_func(*inputs):
-                    # Single tensor inputs need to be unwrapped
-                    if len(inputs) == 1:
-                        inputs = inputs[0]
-                    for idx, layer in enumerate(self.forward_funcs[start:end]):
-                        self.curr_layer = idx + self._local_start
-                        if self.seed_layers:
-                            new_seed = (self.base_seed *
-                                        local_micro_offset) + self.curr_layer
-                            if self.seed_fn:
-                                self.seed_fn(new_seed)
-                            else:
-                                ds_utils.set_random_seed(new_seed)
-
-                        inputs = layer(inputs)
-                    return inputs
-                return exec_func
 
         if self.activation_checkpoint_interval == 0:
             func = exec_range_func(0, len(self.forward_funcs))
@@ -369,6 +360,7 @@ class PipelineModule(nn.Module):
         else:
             num_layers = len(self.forward_funcs)
             x = forward_input
+
             for start_idx in range(0, num_layers, self.activation_checkpoint_interval):
                 end_idx = min(start_idx + self.activation_checkpoint_interval,
                               num_layers)
@@ -385,10 +377,8 @@ class PipelineModule(nn.Module):
                                         end_idx),
                         *x)
                 else:
-                    x = exec_range_func(start_idx, end_idx)(*x)
-                    # x = exec_range_func(start_idx, end_idx, True)(*x)
-                    # print(x)
-                    # x = x[0]
+                    # x = exec_range_func(start_idx, end_idx)(*x)
+                    x = exec_range_func(start_idx, end_idx, True)(*x)
         return x
 
     def _partition_layers(self, method='uniform'):
@@ -625,3 +615,46 @@ class PipelineModule(nn.Module):
         params = [f.parameters()
                   for f in funcs if isinstance(f, torch.nn.Module)]
         return any(len(list(p)) > 0 for p in params)
+
+    def add_layers(self, num_layer):
+        # append layer spec
+        specs = self._layer_specs
+        for idx, layer in enumerate(specs[self._local_stop+1:self._local_stop+num_layer]):
+            layer_idx = idx + self._local_stop + 1
+            if isinstance(layer, nn.Module):
+                name = str(layer_idx)
+                self.forward_funcs.append(layer)
+                self.add_module(name, layer)
+            # TiedLayerSpec objects contain an nn.Module that should be allocated now.
+            elif isinstance(layer, TiedLayerSpec):
+                # Build and register the module if we haven't seen it before.
+                if layer.key not in self.tied_modules:
+                    self.tied_modules[layer.key] = layer.build()
+                    self.tied_weight_attrs[layer.key] = layer.tied_weight_attr
+
+                if layer.forward_fn is None:
+                    # Just use forward()
+                    self.forward_funcs.append(self.tied_modules[layer.key])
+                else:
+                    # User specified fn with args (module, input)
+                    self.forward_funcs.append(
+                        partial(layer.forward_fn,
+                                self.tied_modules[layer.key]))
+            # LayerSpec objects contain an nn.Module that should be allocated now.
+            elif isinstance(layer, LayerSpec):
+                module = layer.build()
+                name = str(layer_idx)
+                self.forward_funcs.append(module)
+                self.add_module(name, module)
+            # Last option: layer may be a functional (e.g., lambda). We do nothing in
+            # that case and just use it in forward()
+            else:
+                self.forward_funcs.append(layer)
+        # set model parameter
+
+        self._local_stop += num_layer
+
+    def remove_layers(self, num_layer):
+        self._local_start -= num_layer
+        for i in range(num_layer):
+            self.forward_funcs.pop(0)

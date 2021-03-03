@@ -152,7 +152,6 @@ class PipelineEngine(DeepSpeedEngine):
             'labels': [],   # labels from batch input
             'outputs': [],  # activations
             'output_tensors': [],  # tensor object to preserve backward graph
-            'layer_output': []  # Output of each
         }
         self.pipe_recv_buf = None
         self.grad_layer = None
@@ -627,6 +626,7 @@ class PipelineEngine(DeepSpeedEngine):
         self.pipe_buffers['output_tensors'][buffer_id] = None
         self.pipe_buffers['outputs'][buffer_id] = None
         grad_tensors = None
+        self.module.reset_layerwise_output()
 
         if self.wall_clock_breakdown():
             self.timers('backward_inner').stop()
@@ -1223,30 +1223,26 @@ class PipelineEngine(DeepSpeedEngine):
     def remapping_layer(self, from_rank, to_rank):
         if self.global_rank == from_rank:
             # Sending and Removing computed data
-            for key in self.pipe_buffers:
-                # inputs -> batch input and received activations, ,,
-                # labels -> labels
-                # outputs -> activations
-                # output_tensors -> tensor object to preserve backward graph
+            # inputs -> batch (input and received activations, should exist on the to_rank)
+            # labels -> labels (IGNORED assume NUM_MOVING_LAYER<total layer)
+            # outputs -> activations (IGNORED assume NUM_MOVING_LAYER<total layer)
+            # output_tensors -> tensor object to preserve backward graph (IGNORED assume NUM_MOVING_LAYER<total layer)
 
-                # let us first send out data
-                for _ in range(NUM_MOVING_LAYER):
-                    p2p.send(self.pipe_buffers[key][0], to_rank)
-                    self.pipe_buffers[key].pop(0)
+            # let us first send out layer output, conceptually only the n th layer is required
+            # for layer_idx in range(NUM_MOVING_LAYER):
+            p2p.send(self.module.layerwise_output[NUM_MOVING_LAYER-1], to_rank)
+            # send model parameters
+            # for module in self.named_modules():
+            #      module[0]
 
-            # input
-            # activation
-            # gradient
             # Removing Model related
-            # layer
-            # parameter
 
         if self.global_rank == to_rank:
+            # not too sure about the size here
+            tmp_tensor = torch.tensor(data=[0]).to(self.device)
+            p2p.recv(tmp_tensor, from_rank)
+
             # Receiving computed data
-            for key in self.pipe_buffers:
-                for _ in range(NUM_MOVING_LAYER):
-                    # p2p.recv(self.pipe_buffers[key])
-                    pass
             # input
             # activation
             # gradient
