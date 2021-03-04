@@ -1,9 +1,12 @@
+import torch
 import torch.distributed as dist
 import boto3
 from datetime import timedelta
 
 # communication class for pipe engine
-
+# use to determine:
+#   1. remapping is happening or not
+#   2. store remapping related variable TODO: move this to each worker
 TCP_STORE_PORT = 8877
 
 
@@ -33,11 +36,14 @@ class CoordComm:
                     private_ips = inst["PrivateIpAddress"]
 
         assert len(private_ips) == 1,\
-            f"Multiple Instances named {coord_server_name} as coordinates server"
+            f"No Instance named {coord_server_name}\n/Multiple Instances named {coord_server_name} as coordinates server"
         return private_ips[0]
 
     def setStateDict(self, name, state):
-        pass
+        self.client_store.set(name, state)
 
-    def getStateDict(self, name, state):
-        pass
+    def getStateDict(self, name):
+        self.client_store.wait(name)
+        state_dict_raw = self.client_store.get(name)
+        self.client_store.delete(name)
+        return torch.load(state_dict_raw)

@@ -200,43 +200,11 @@ class PipelineModule(nn.Module):
         self.activation_checkpoint_func = activation_checkpoint_func
 
         print("------------")
-        self.remove_layers(2)
-        # for module in self.named_modules():
-        #     if (module[0] == '12'):
-        #         # if (module[0] == '12.attention.query_key_value'):
-        #         # print(module[1].state_dict())
-        #         buffer = io.BytesIO()
-        #         torch.save(module[1].state_dict(), buffer)
-        #         buffer.seek(0)
-        #         x = torch.load(buffer)
-        #         print(x)
-        #         break
-
-        # x:OrderedDict = module[1].state_dict()
-        #     print(x.keys())
-        #     break
-
-        # if module_name == "12":
-        # print(module[1].state_dict())
-        # print(module[1].state_dict())
-        # print(module)
-        # break
-
-        # a = None
-        # for c in self.children():
-        #     a: OrderedDict = c.state_dict()
-        #     print(c.state_dict())
-        #     break
-        # a['embed.word_embeddings.weight'] = torch.zeros_like(
-        #     a['embed.word_embeddings.weight'])
-        # # print(a['embed.word_embeddings.weight'])
-        # for c in self.children():
-        #     c.load_state_dict(a)
-        #     print(c.state_dict())
-        #     break
-
+        for name in list(self.named_modules()):
+            print(name[0])
+            print(name[0].isdigit())
         print("------------")
-        exit()
+        # exit()
 
         # index->layer
         self.layerwise_output = [list()*len(self.forward_funcs)]
@@ -668,7 +636,6 @@ class PipelineModule(nn.Module):
             # that case and just use it in forward()
             else:
                 self.forward_funcs.append(layer)
-        # set model parameter
 
         self._local_stop += num_layer
 
@@ -684,6 +651,4 @@ class PipelineModule(nn.Module):
 
     def layer_state_dict(self, layer_idx):
         layer_names = list(self._modules.keys())
-        for n in layer_names:
-            if n == str(layer_idx):
-                return self._modules[n].state_dict()
+        return self._modules[layer_names[layer_idx]].state_dict()
