@@ -1,19 +1,21 @@
 import torch.distributed as dist
 import boto3
-import requests
+from datetime import timedelta
 
 # communication class for pipe engine
 
+TCP_STORE_PORT = 8877
+
 
 class CoordComm:
-    def __init__(self, coord_server_name="coord", port="3000"):
+    def __init__(self, coord_server_name="coord"):
         self.private_ip = self.get_coord_server_ip(coord_server_name)
-        self.endpoint = self.private_ip + port
-        self.session = requests.Session()
+        self.port = TCP_STORE_PORT
+        self.client_store = dist.TCPStore(
+            self.private_ip, TCP_STORE_PORT, False, timedelta(seconds=30))
 
     def check_reconfiguration(self):
-        resp = self.session.get(f'{self.endpoint}/status')
-        return resp.text == 'YES'
+        return self.client_store.get('remapping')
 
     # get the name of coord server
     def get_coord_server_ip(self, coord_server_name):
@@ -33,3 +35,9 @@ class CoordComm:
         assert len(private_ips) == 1,\
             f"Multiple Instances named {coord_server_name} as coordinates server"
         return private_ips[0]
+
+    def setStateDict(self, name, state):
+        pass
+
+    def getStateDict(self, name, state):
+        pass

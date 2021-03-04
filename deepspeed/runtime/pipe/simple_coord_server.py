@@ -1,31 +1,13 @@
 import sys
 import os
-from flask import json
-from flask import Flask
-app = Flask("coord server")
+import torch.distributed as dist
+from datetime import timedelta
 
-remapping = False
-# return if there is layer remapping happening
-
-
-@app.route('/status', methods=['GET'])
-def status():
-    return str(remapping)
-
-
-@app.route('/yes', methods=['POST', 'GET'])
-def setYes():
-    global remapping
-    remapping = True
-    return 'OK'
-
-
-@app.route('/no', methods=['POST', 'GET'])
-def setNo():
-    global remapping
-    remapping = False
-    return 'OK'
-
+TCP_STORE_PORT = 8877
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    server_store = dist.TCPStore(
+        "0.0.0.0", TCP_STORE_PORT, 100, True, timedelta(seconds=30))
+    server_store.set('remapping', '0')
+    while True:
+        pass

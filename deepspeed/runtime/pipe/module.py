@@ -1,3 +1,4 @@
+import io
 import os
 import enum
 
@@ -199,10 +200,27 @@ class PipelineModule(nn.Module):
         self.activation_checkpoint_func = activation_checkpoint_func
 
         print("------------")
-        for module in self.named_modules():
-            print(module)
-            # print(module[1].state_dict())
-            # break
+        self.remove_layers(2)
+        # for module in self.named_modules():
+        #     if (module[0] == '12'):
+        #         # if (module[0] == '12.attention.query_key_value'):
+        #         # print(module[1].state_dict())
+        #         buffer = io.BytesIO()
+        #         torch.save(module[1].state_dict(), buffer)
+        #         buffer.seek(0)
+        #         x = torch.load(buffer)
+        #         print(x)
+        #         break
+
+        # x:OrderedDict = module[1].state_dict()
+        #     print(x.keys())
+        #     break
+
+        # if module_name == "12":
+        # print(module[1].state_dict())
+        # print(module[1].state_dict())
+        # print(module)
+        # break
 
         # a = None
         # for c in self.children():
@@ -655,6 +673,14 @@ class PipelineModule(nn.Module):
         self._local_stop += num_layer
 
     def remove_layers(self, num_layer):
-        self._local_start -= num_layer
-        for i in range(num_layer):
+        for _ in range(num_layer):
             self.forward_funcs.pop(0)
+
+        layer_names = list(self._modules.keys())[:num_layer]
+        for n in layer_names:
+            del self._modules[n]
+            
+        self._local_start -= num_layer
+
+    def layer_state_dict(self,layer_idx):
+        pass

@@ -6,6 +6,7 @@ import copy
 import os
 
 from types import MethodType
+from typing import OrderedDict
 
 from numpy import prod
 
@@ -1229,13 +1230,24 @@ class PipelineEngine(DeepSpeedEngine):
             # output_tensors -> tensor object to preserve backward graph (IGNORED assume NUM_MOVING_LAYER<total layer)
 
             # let us first send out layer output, conceptually only the n th layer is required
-            # for layer_idx in range(NUM_MOVING_LAYER):
             p2p.send(self.module.layerwise_output[NUM_MOVING_LAYER-1], to_rank)
-            # send model parameters
-            # for module in self.named_modules():
-            #      module[0]
+
+            # Send model parameters
+            
+            
+            # send individual tensor
+            # for i in range(NUM_MOVING_LAYER):
+            #     layer_idx = self.module._local_start + i
+            #     for module in self.module.named_modules():
+            #         module_name = module[0]
+            #         module_obj = module[1]
+            #         if module_name == str(layer_idx):
+            #             state_dict: OrderedDict = module_obj.state_dict()
+            #             for name in state_dict.keys():
+            #                 p2p.send(state_dict[name])
 
             # Removing Model related
+            self.module.remove_layers(NUM_MOVING_LAYER)
 
         if self.global_rank == to_rank:
             # not too sure about the size here
