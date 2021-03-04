@@ -26,6 +26,7 @@ from .module import PipelineModule, PipelineError, TiedLayerSpec
 from . import p2p
 from . import schedule
 from .pipe_profile import PipelineProfiler
+from .coord_comm import CoordComm
 
 TARGET_ID = -2
 LOG_STAGE = -2

@@ -679,8 +679,11 @@ class PipelineModule(nn.Module):
         layer_names = list(self._modules.keys())[:num_layer]
         for n in layer_names:
             del self._modules[n]
-            
+
         self._local_start -= num_layer
 
-    def layer_state_dict(self,layer_idx):
-        pass
+    def layer_state_dict(self, layer_idx):
+        layer_names = list(self._modules.keys())
+        for n in layer_names:
+            if n == str(layer_idx):
+                return self._modules[n].state_dict()
