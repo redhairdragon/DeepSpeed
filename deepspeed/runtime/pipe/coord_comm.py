@@ -1,8 +1,9 @@
+from apex.amp.frontend import state_dict
 import torch
 import torch.distributed as dist
 import boto3
 from datetime import timedelta
-
+import io
 # communication class for pipe engine
 # use to determine:
 #   1. remapping is happening or not
@@ -33,17 +34,21 @@ class CoordComm:
         for insts in response['Reservations']:
             for inst in insts["Instances"]:
                 if "PrivateIpAddress" in inst and inst['State']['Name'] == 'running':
-                    private_ips = inst["PrivateIpAddress"]
+                    private_ips.append(inst["PrivateIpAddress"])
 
         assert len(private_ips) == 1,\
-            f"No Instance named {coord_server_name}\n/Multiple Instances named {coord_server_name} as coordinates server"
+            f"No Instance named {coord_server_name}/Multiple Instances named {coord_server_name} as coordinates server"
         return private_ips[0]
 
     def setStateDict(self, name, state):
-        self.client_store.set(name, state)
+        buffer = io.BytesIO()
+        torch.save(state, buffer)
+        buffer.seek(0)
+        self.client_store.set(name, buffer.read())
 
     def getStateDict(self, name):
-        self.client_store.wait(name)
+        self.client_store.wait([name])
         state_dict_raw = self.client_store.get(name)
-        self.client_store.delete(name)
-        return torch.load(state_dict_raw)
+        self.client_store.delete_key(name)
+        buffer = io.BytesIO(state_dict_raw)
+        return torch.load(buffer)

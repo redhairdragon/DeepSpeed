@@ -214,6 +214,9 @@ class PipelineEngine(DeepSpeedEngine):
         })
         self.coord_com = CoordComm()
 
+        self.remapping_layer(1, 0)
+        exit()
+
     def _build_data_iter(self, dataset):
         sampler = torch.utils.data.distributed.DistributedSampler(
             dataset,
@@ -1224,6 +1227,8 @@ class PipelineEngine(DeepSpeedEngine):
         self.batch_fn = fn
 
     def remapping_layer(self, from_rank, to_rank):
+
+        print("-------REMAPPINP--------")
         if self.global_rank == from_rank:
             # Sending and Removing computed data
             # inputs -> batch (input and received activations, should exist on the to_rank)
@@ -1233,8 +1238,9 @@ class PipelineEngine(DeepSpeedEngine):
 
             # Send out layer output, conceptually only the n th layer is required
             #   first send number of micro-batches computed
-            p2p.send(torch.Tensor(
-                [len(self.module.layerwise_output[NUM_MOVING_LAYER-1])]), to_rank)
+            num_micro_batches = torch.Tensor(
+                [len(self.module.layerwise_output[NUM_MOVING_LAYER-1])]).to(self.device)
+            p2p.send(num_micro_batches, to_rank)
             for inter_output in self.module.layerwise_output[NUM_MOVING_LAYER-1]:
                 p2p.send(inter_output.shape, to_rank)
                 p2p.send(inter_output, to_rank)
@@ -1252,10 +1258,10 @@ class PipelineEngine(DeepSpeedEngine):
             self.module.add_layers(NUM_MOVING_LAYER)
 
             # Number of computed micro-batches
-            num_micro_batches = torch.Tensor(1)
-            p2p.recv(torch.Tensor(num_micro_batches, from_rank))
+            num_micro_batches = torch.Tensor(1).to(self.device)
+            p2p.recv(num_micro_batches, from_rank)
             inter_layer_output = list()
-            for _ in range(num_micro_batches[0]):
+            for _ in range(int(num_micro_batches[0])):
                 shape = torch.Size([0, 0])
                 p2p.recv(shape, from_rank)
                 tmp_tensor = torch.tensor(shape).to(self.device)
@@ -1266,7 +1272,7 @@ class PipelineEngine(DeepSpeedEngine):
             for module in list(self.module.named_modules()):
                 name = module[0]
                 module_obj = module[1]
-                if name.isdigit() and int(name)>=previous_local_stop:
+                if name.isdigit() and int(name) >= previous_local_stop:
                     state_dict = self.coord_com.getStateDict(name)
                     module_obj.load_state_dict(state_dict)
             # input
