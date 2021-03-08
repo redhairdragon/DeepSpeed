@@ -216,6 +216,9 @@ class PipelineEngine(DeepSpeedEngine):
         print("comm connected")
         self.remapping_layer(1, 0)
 
+        self.remapping_layer(1, 0)
+        exit()
+
     def _build_data_iter(self, dataset):
         sampler = torch.utils.data.distributed.DistributedSampler(
             dataset,
