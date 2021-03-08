@@ -199,15 +199,13 @@ class PipelineModule(nn.Module):
         self.activation_checkpoint_interval = activation_checkpoint_interval
         self.activation_checkpoint_func = activation_checkpoint_func
 
-        print("------------")
-        for name in list(self.named_modules()):
-            print(name[0])
-            print(name[0].isdigit())
-        print("------------")
+        # print("------------")
+        # print("------------")
         # exit()
 
         # index->layer
-        self.layerwise_output = [list()*len(self.forward_funcs)]
+        self.layerwise_output = [list()
+                                 for _ in range(len(self.forward_funcs))]
 
     def _build(self):
         specs = self._layer_specs
