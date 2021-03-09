@@ -51,7 +51,8 @@ class LayerSpec:
         self.module_kwargs = module_kwargs
 
         if not issubclass(typename, nn.Module):
-            raise RuntimeError("LayerSpec only supports torch.nn.Module types.")
+            raise RuntimeError(
+                "LayerSpec only supports torch.nn.Module types.")
 
         if dist.is_initialized():
             self.global_rank = dist.get_rank()
@@ -85,6 +86,61 @@ class TiedLayerSpec(LayerSpec):
         self.key = key
         self.forward_fn = forward_fn
         self.tied_weight_attr = tied_weight_attr
+
+
+class PartialPipeModule(nn.Module):
+    def __init__(self, spec, start, stop, tied_module, tied_weight_attrs) -> None:
+        super().__init__()
+        self.forward_funcs = []
+        self._local_start = start
+        self._local_stop = stop
+        self.tied_module = tied_module
+        self.tied_weight_attrs = tied_weight_attrs
+
+        self._build(spec)
+
+    def _build(self, specs):
+        for local_idx, layer in enumerate(specs[self._local_start: self._local_stop]):
+            layer_idx = local_idx + self._local_start
+
+            # Recursively build PipelineModule objects
+            # if isinstance(layer, PipelineModule):
+            #     raise NotImplementedError(
+            #         "RECURSIVE BUILD NOT YET IMPLEMENTED")
+
+            # LayerSpec objects contain an nn.Module that should be allocated now.
+            if isinstance(layer, nn.Module):
+                name = str(layer_idx)
+                self.forward_funcs.append(layer)
+                self.add_module(name, layer)
+
+            # TiedLayerSpec objects contain an nn.Module that should be allocated now.
+            elif isinstance(layer, TiedLayerSpec):
+                # Build and register the module if we haven't seen it before.
+                if layer.key not in self.tied_modules:
+                    self.tied_modules[layer.key] = layer.build()
+                    self.tied_weight_attrs[layer.key] = layer.tied_weight_attr
+
+                if layer.forward_fn is None:
+                    # Just use forward()
+                    self.forward_funcs.append(self.tied_modules[layer.key])
+                else:
+                    # User specified fn with args (module, input)
+                    self.forward_funcs.append(
+                        partial(layer.forward_fn, self.tied_modules[layer.key])
+                    )
+
+            # LayerSpec objects contain an nn.Module that should be allocated now.
+            elif isinstance(layer, LayerSpec):
+                module = layer.build()
+                name = str(layer_idx)
+                self.forward_funcs.append(module)
+                self.add_module(name, module)
+
+            # Last option: layer may be a functional (e.g., lambda). We do nothing in
+            # that case and just use it in forward()
+            else:
+                self.forward_funcs.append(layer)
 
 
 class PipelineModule(nn.Module):
@@ -167,7 +223,8 @@ class PipelineModule(nn.Module):
                         f"num_stages ({self.num_stages}) must divide distributed world size ({self.world_size})"
                     )
                 dp = self.world_size // num_stages
-                topology = PipeDataParallelTopology(num_pp=num_stages, num_dp=dp)
+                topology = PipeDataParallelTopology(
+                    num_pp=num_stages, num_dp=dp)
                 self._topo = topology
 
         # Contruct communicators for pipeline topology
@@ -203,16 +260,18 @@ class PipelineModule(nn.Module):
         self.activation_checkpoint_func = activation_checkpoint_func
 
         # save layer output here
-        self.layerwise_output = [list() for _ in range(len(self.forward_funcs))]
+        self.layerwise_output = [list()
+                                 for _ in range(len(self.forward_funcs))]
 
         # save received layer output here
         # microbatch -> recv layer output
         self.received_layer_output = dict()
+        self.partialModules = list()
 
     def _build(self):
         specs = self._layer_specs
 
-        for local_idx, layer in enumerate(specs[self._local_start : self._local_stop]):
+        for local_idx, layer in enumerate(specs[self._local_start: self._local_stop]):
             layer_idx = local_idx + self._local_start
             if self.seed_layers:
                 if self.seed_fn:
@@ -222,7 +281,8 @@ class PipelineModule(nn.Module):
 
             # Recursively build PipelineModule objects
             if isinstance(layer, PipelineModule):
-                raise NotImplementedError("RECURSIVE BUILD NOT YET IMPLEMENTED")
+                raise NotImplementedError(
+                    "RECURSIVE BUILD NOT YET IMPLEMENTED")
 
             # LayerSpec objects contain an nn.Module that should be allocated now.
             elif isinstance(layer, nn.Module):
@@ -400,9 +460,11 @@ class PipelineModule(nn.Module):
                     weights=binary_weights, num_parts=num_stages
                 )
         elif method == "profile":
-            raise NotImplementedError(f"Partitioning method {method} not implemented.")
+            raise NotImplementedError(
+                f"Partitioning method {method} not implemented.")
         else:
-            raise NotImplementedError(f"Partitioning method {method} not implemented.")
+            raise NotImplementedError(
+                f"Partitioning method {method} not implemented.")
 
         # Print some information on the partitioning.
         if self.global_rank == 0:
@@ -428,7 +490,8 @@ class PipelineModule(nn.Module):
                 except AttributeError:
                     print(f"  loss: {self.loss_fn.__class__.__name__}")
 
-        self._set_bounds(start=self.parts[stage_id], stop=self.parts[stage_id + 1])
+        self._set_bounds(
+            start=self.parts[stage_id], stop=self.parts[stage_id + 1])
 
     def allreduce_tied_weight_gradients(self):
         """All reduce the gradients of the tied weights between tied stages"""
@@ -543,9 +606,11 @@ class PipelineModule(nn.Module):
         # Data parallelism is omitted from the naming convention because we are agnostic
         # to this in the checkpoint.
         omit_dims = frozenset(["data"])
-        axes = [a for a in self._grid._topo.get_axis_names() if a not in omit_dims]
+        axes = [a for a in self._grid._topo.get_axis_names()
+                if a not in omit_dims]
         for dim in axes:
-            rank = getattr(self._grid._topo.get_coord(rank=self.global_rank), dim)
+            rank = getattr(self._grid._topo.get_coord(
+                rank=self.global_rank), dim)
             rank_name += f"-{dim}_{rank:02d}"
 
         ckpt_name = os.path.join(checkpoints_path, str(tag), rank_name)
@@ -584,7 +649,8 @@ class PipelineModule(nn.Module):
 
             model_ckpt_path = self.ckpt_layer_path(load_dir, idx)
             layer.load_state_dict(
-                torch.load(model_ckpt_path, map_location=lambda storage, loc: storage),
+                torch.load(model_ckpt_path,
+                           map_location=lambda storage, loc: storage),
                 strict=strict,
             )
             if self._grid.data_parallel_id == 0:
@@ -600,46 +666,16 @@ class PipelineModule(nn.Module):
                 "ParallelTransformerLayerPipe" in f.__class__.__name__ for f in funcs
             )
 
-        params = [f.parameters() for f in funcs if isinstance(f, torch.nn.Module)]
+        params = [f.parameters()
+                  for f in funcs if isinstance(f, torch.nn.Module)]
         return any(len(list(p)) > 0 for p in params)
 
     # add layer to the end of stage
     def add_layers(self, num_layer):
         # append layer spec
-        specs = self._layer_specs
-        for idx, layer in enumerate(
-            specs[self._local_stop : self._local_stop + num_layer]
-        ):
-            layer_idx = idx + self._local_stop
-            if isinstance(layer, nn.Module):
-                name = str(layer_idx)
-                self.forward_funcs.append(layer)
-                self.add_module(name, layer)
-            # TiedLayerSpec objects contain an nn.Module that should be allocated now.
-            elif isinstance(layer, TiedLayerSpec):
-                # Build and register the module if we haven't seen it before.
-                if layer.key not in self.tied_modules:
-                    self.tied_modules[layer.key] = layer.build()
-                    self.tied_weight_attrs[layer.key] = layer.tied_weight_attr
-
-                if layer.forward_fn is None:
-                    # Just use forward()
-                    self.forward_funcs.append(self.tied_modules[layer.key])
-                else:
-                    # User specified fn with args (module, input)
-                    self.forward_funcs.append(
-                        partial(layer.forward_fn, self.tied_modules[layer.key])
-                    )
-            # LayerSpec objects contain an nn.Module that should be allocated now.
-            elif isinstance(layer, LayerSpec):
-                module = layer.build()
-                name = str(layer_idx)
-                self.forward_funcs.append(module)
-                self.add_module(name, module)
-            # Last option: layer may be a functional (e.g., lambda). We do nothing in
-            # that case and just use it in forward()
-            else:
-                self.forward_funcs.append(layer)
+        partialModule = PartialPipeModule(self.specs, self._local_stop, self._local_stop+num_layer,
+                                          self.tied_modules, self.tied_weight_attrs)
+        self.partialModules.append(partialModule)
         self._local_stop += num_layer
 
     # remove layers from beginning
@@ -664,6 +700,3 @@ class PipelineModule(nn.Module):
                 return module[1].state_dict()
 
         return None  # Probably a tied layer or fn layer
-
-    def splitted_module(self, start, end):
-        return None
