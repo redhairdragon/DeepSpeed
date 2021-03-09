@@ -212,6 +212,7 @@ class PipelineEngine(DeepSpeedEngine):
             "micro_batch_size": self.micro_batch_size,
             "global_rank": self.global_rank
         })
+        self.coord_com = CoordComm()
 
     def _build_data_iter(self, dataset):
         sampler = torch.utils.data.distributed.DistributedSampler(
@@ -1230,35 +1231,44 @@ class PipelineEngine(DeepSpeedEngine):
             # outputs -> activations (IGNORED assume NUM_MOVING_LAYER<total layer)
             # output_tensors -> tensor object to preserve backward graph (IGNORED assume NUM_MOVING_LAYER<total layer)
 
-            # let us first send out layer output, conceptually only the n th layer is required
-            p2p.send(self.module.layerwise_output[NUM_MOVING_LAYER-1], to_rank)
+            # Send out layer output, conceptually only the n th layer is required
+            #   first send number of micro-batches computed
+            p2p.send(torch.Tensor(
+                [len(self.module.layerwise_output[NUM_MOVING_LAYER-1])]), to_rank)
+            for inter_output in self.module.layerwise_output[NUM_MOVING_LAYER-1]:
+                p2p.send(inter_output.shape, to_rank)
+                p2p.send(inter_output, to_rank)
 
             # Send model parameters
-            
-            
-            # send individual tensor
-            # for i in range(NUM_MOVING_LAYER):
-            #     layer_idx = self.module._local_start + i
-            #     for module in self.module.named_modules():
-            #         module_name = module[0]
-            #         module_obj = module[1]
-            #         if module_name == str(layer_idx):
-            #             state_dict: OrderedDict = module_obj.state_dict()
-            #             for name in state_dict.keys():
-            #                 p2p.send(state_dict[name])
+            for i in range(NUM_MOVING_LAYER):
+                self.coord_com.setStateDict(
+                    str(self.module._local_start+i), self.module.layer_state_dict(i))
 
             # Removing Model related
             self.module.remove_layers(NUM_MOVING_LAYER)
 
         if self.global_rank == to_rank:
-            # not too sure about the size here
-            tmp_tensor = torch.tensor(data=[0]).to(self.device)
-            p2p.recv(tmp_tensor, from_rank)
+            previous_local_stop = self.module._local_stop
+            self.module.add_layers(NUM_MOVING_LAYER)
 
-            # Receiving computed data
+            # Number of computed micro-batches
+            num_micro_batches = torch.Tensor(1)
+            p2p.recv(torch.Tensor(num_micro_batches, from_rank))
+            inter_layer_output = list()
+            for _ in range(num_micro_batches[0]):
+                shape = torch.Size([0, 0])
+                p2p.recv(shape, from_rank)
+                tmp_tensor = torch.tensor(shape).to(self.device)
+                p2p.recv(tmp_tensor, from_rank)
+                inter_layer_output.append(tmp_tensor)
+
+            # Load model param
+            for module in list(self.module.named_modules()):
+                name = module[0]
+                module_obj = module[1]
+                if name.isdigit() and int(name)>=previous_local_stop:
+                    state_dict = self.coord_com.getStateDict(name)
+                    module_obj.load_state_dict(state_dict)
             # input
             # activation
             # gradient
-            # Adding corresponding model
-            # layer
-            # parameter
