@@ -40,7 +40,8 @@ class LayerSpec:
     .. code-block:: python
 
         layer_specs = [
-            LayerSpec(torch.nn.Linear, self.in_dim, self.hidden_dim, bias=False),
+            LayerSpec(torch.nn.Linear, self.in_dim,
+                      self.hidden_dim, bias=False),
             LayerSpec(torch.nn.Linear, self.hidden_hidden, self.out_dim)]
         ]
     """
@@ -433,7 +434,7 @@ class PipelineModule(nn.Module):
                     )
                 else:
                     # x = exec_range_func(start_idx, end_idx)(*x)
-                    self.layerwise_output[self.curr_fwd_batch]=[]
+                    self.layerwise_output[self.curr_fwd_batch] = []
                     x = exec_range_func(start_idx, end_idx, True)(*x)
         return x
 

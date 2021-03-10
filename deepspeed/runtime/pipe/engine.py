@@ -1296,7 +1296,8 @@ class PipelineEngine(DeepSpeedEngine):
                 tensor = self.module.layerwise_output[micro_batch_id][NUM_MOVING_LAYER-1]
                 p2p.send(torch.Tensor([micro_batch_id]).to(
                     self.device), to_rank)
-                p2p.send(tensor.shape, to_rank)
+                p2p.send(torch.Tensor(
+                    [tensor.shape[0], tensor.shape[1]]).to(self.device), to_rank)
                 p2p.send(tensor, to_rank)
 
             # Send model parameters
@@ -1322,9 +1323,10 @@ class PipelineEngine(DeepSpeedEngine):
             for _ in range(int(num_micro_batches[0])):
                 micro_batch_id = torch.Tensor(1).to(self.device)
                 p2p.recv(micro_batch_id, from_rank)
-                shape = torch.Size([0, 0])
+                shape = torch.Tensor([0, 0]).to(self.device)
                 p2p.recv(shape, from_rank)
-                tmp_tensor = torch.tensor(shape).to(self.device)
+                tmp_tensor = torch.tensor(
+                    [int(shape[0]), int(shape[1])]).to(self.device)
                 p2p.recv(tmp_tensor, from_rank)
                 inter_layer_output[int(micro_batch_id[0])] = tmp_tensor
             self.module.received_layer_output[previous_local_stop] = inter_layer_output
