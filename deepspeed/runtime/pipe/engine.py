@@ -27,14 +27,11 @@ from . import p2p
 from . import schedule
 from .pipe_profile import PipelineProfiler
 from .coord_comm import CoordComm
+from .constant import NUM_MOVING_LAYER
 
 TARGET_ID = -2
 LOG_STAGE = -2
 DATA_PARALLEL_ID = -2
-
-
-# REMAPPING
-NUM_MOVING_LAYER = 3
 
 
 def is_even(number):
@@ -224,7 +221,6 @@ class PipelineEngine(DeepSpeedEngine):
         )
         self.coord_com = CoordComm()  # connect to a unique instance named "coord"
 
-        self.splitted_module = None
         self.remapping_layer(1, 0)
         exit()
 
@@ -569,6 +565,7 @@ class PipelineEngine(DeepSpeedEngine):
         # tensor changes across batches
         self._zero_grads(inputs)
 
+        self.module.set_batch_id(buffer_id)
         outputs = super().forward(inputs)
 
         # Partition the outputs if we are not the last stage
@@ -672,7 +669,7 @@ class PipelineEngine(DeepSpeedEngine):
         self.pipe_buffers["output_tensors"][buffer_id] = None
         self.pipe_buffers["outputs"][buffer_id] = None
         grad_tensors = None
-        self.module.reset_layerwise_output()
+        self.module.delete_layerwise_output(buffer_id)
 
         if self.wall_clock_breakdown():
             self.timers("backward_inner").stop()
@@ -1291,12 +1288,16 @@ class PipelineEngine(DeepSpeedEngine):
             # Send out layer output, conceptually only the n th layer is required
             #   first send number of micro-batches computed
             num_micro_batches = torch.Tensor(
-                [len(self.module.layerwise_output[NUM_MOVING_LAYER - 1])]
+                [len(self.module.layerwise_output)]
             ).to(self.device)
+
             p2p.send(num_micro_batches, to_rank)
-            for inter_output in self.module.layerwise_output[NUM_MOVING_LAYER - 1]:
-                p2p.send(inter_output.shape, to_rank)
-                p2p.send(inter_output, to_rank)
+            for micro_batch_id in self.module.layerwise_output:
+                tensor = self.module.layerwise_output[micro_batch_id][NUM_MOVING_LAYER-1]
+                p2p.send(torch.Tensor([micro_batch_id]).to(
+                    self.device), to_rank)
+                p2p.send(tensor.shape, to_rank)
+                p2p.send(tensor, to_rank)
 
             # Send model parameters
             for i in range(NUM_MOVING_LAYER):
@@ -1317,17 +1318,19 @@ class PipelineEngine(DeepSpeedEngine):
             # Number of computed micro-batches
             num_micro_batches = torch.Tensor(1).to(self.device)
             p2p.recv(num_micro_batches, from_rank)
-            inter_layer_output = list()
+            inter_layer_output = dict()
             for _ in range(int(num_micro_batches[0])):
+                micro_batch_id = torch.Tensor(1).to(self.device)
+                p2p.recv(micro_batch_id, from_rank)
                 shape = torch.Size([0, 0])
                 p2p.recv(shape, from_rank)
                 tmp_tensor = torch.tensor(shape).to(self.device)
                 p2p.recv(tmp_tensor, from_rank)
-                inter_layer_output.append(tmp_tensor)
+                inter_layer_output[int(micro_batch_id[0])] = tmp_tensor
             self.module.received_layer_output[previous_local_stop] = inter_layer_output
 
             # Load model param
-            for module in list(self.module.partialModules[-1].named_modules()):
+            for module in list(self.module.partial_modules[-1].named_modules()):
                 name = module[0]
                 module_obj = module[1]
                 if name.isdigit() and int(name) >= previous_local_stop:

@@ -260,13 +260,14 @@ class PipelineModule(nn.Module):
         self.activation_checkpoint_func = activation_checkpoint_func
 
         # save layer output here
-        self.layerwise_output = [list()
-                                 for _ in range(len(self.forward_funcs))]
+        # microbatch -> [list() for _ in range(len(self.forward_funcs))]
+        self.layerwise_output = dict()
 
         # save received layer output here
         # microbatch -> recv layer output
         self.received_layer_output = dict()
-        self.partialModules = list()
+        self.partial_modules = list()
+        self.curr_fwd_batch = -1
 
     def _build(self):
         specs = self._layer_specs
@@ -365,8 +366,8 @@ class PipelineModule(nn.Module):
             )
         return idxs
 
-    def reset_layerwise_output(self):
-        self.layerwise_output = [list() * len(self.forward_funcs)]
+    def delete_layerwise_output(self, batch_id):
+        del self.layerwise_output[batch_id]
 
     def forward(self, forward_input):
         # We need to offset the seed by the microbatch ID. Save it in a local var to
@@ -397,7 +398,13 @@ class PipelineModule(nn.Module):
 
                     inputs = layer(inputs)
                     if save_layer_outputs:
-                        self.layerwise_output[idx].append(inputs)
+                        # memory issue here, maybe only store the output of the last moving layer
+                        self.layerwise_output[self.curr_fwd_batch].append(
+                            inputs)
+
+                for partial_mod in self.partial_modules:
+                    pass
+
                 return inputs
 
             return exec_func
@@ -426,7 +433,7 @@ class PipelineModule(nn.Module):
                     )
                 else:
                     # x = exec_range_func(start_idx, end_idx)(*x)
-                    print("FOWARD EXEC HERE")
+                    self.layerwise_output[self.curr_fwd_batch]=[]
                     x = exec_range_func(start_idx, end_idx, True)(*x)
         return x
 
@@ -675,7 +682,7 @@ class PipelineModule(nn.Module):
         # append layer spec
         partialModule = PartialPipeModule(self.specs, self._local_stop, self._local_stop+num_layer,
                                           self.tied_modules, self.tied_weight_attrs)
-        self.partialModules.append(partialModule)
+        self.partial_modules.append(partialModule)
         self._local_stop += num_layer
 
     # remove layers from beginning
@@ -700,3 +707,6 @@ class PipelineModule(nn.Module):
                 return module[1].state_dict()
 
         return None  # Probably a tied layer or fn layer
+
+    def set_batch_id(self, batch_id):
+        self.curr_fwd_batch = batch_id
