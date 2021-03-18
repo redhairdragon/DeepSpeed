@@ -17,6 +17,8 @@ from .. import utils as ds_utils
 from ..activation_checkpointing import checkpointing
 from .topology import PipeDataParallelTopology, PipelineParallelGrid
 
+from .constant import NUM_MOVING_LAYER
+
 
 class PipelineError(Exception):
     """Errors related to the use of deepspeed.PipelineModule """
@@ -368,7 +370,8 @@ class PipelineModule(nn.Module):
         return idxs
 
     def delete_layerwise_output(self, batch_id):
-        del self.layerwise_output[batch_id]
+        if batch_id in self.layerwise_output:
+            del self.layerwise_output[batch_id]
 
     def forward(self, forward_input):
         # We need to offset the seed by the microbatch ID. Save it in a local var to
@@ -398,10 +401,12 @@ class PipelineModule(nn.Module):
                             ds_utils.set_random_seed(new_seed)
 
                     inputs = layer(inputs)
-                    if save_layer_outputs:
-                        # memory issue here, maybe only store the output of the last moving layer
-                        self.layerwise_output[self.curr_fwd_batch].append(
-                            inputs)
+
+                    if save_layer_outputs and self.global_rank == 1 and self.forward_funcs[NUM_MOVING_LAYER-1] is layer:
+                        if type(inputs) is tuple:
+                            self.layerwise_output[self.curr_fwd_batch] = inputs[0]
+                        else:
+                            self.layerwise_output[self.curr_fwd_batch] = inputs
 
                 for partial_mod in self.partial_modules:
                     pass
@@ -430,11 +435,11 @@ class PipelineModule(nn.Module):
 
                 if self._is_checkpointable(funcs):
                     x = self.activation_checkpoint_func(
-                        exec_range_func(start_idx, end_idx), *x
+                        # exec_range_func(start_idx, end_idx), *x
+                        exec_range_func(start_idx, end_idx, True), *x
                     )
                 else:
                     # x = exec_range_func(start_idx, end_idx)(*x)
-                    self.layerwise_output[self.curr_fwd_batch] = []
                     x = exec_range_func(start_idx, end_idx, True)(*x)
         return x
 

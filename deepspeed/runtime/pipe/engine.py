@@ -221,8 +221,8 @@ class PipelineEngine(DeepSpeedEngine):
         )
         self.coord_com = CoordComm()  # connect to a unique instance named "coord"
 
-        self.remapping_layer(1, 0)
-        exit()
+        # self.remapping_layer(1, 0)
+        # exit()
 
     def _build_data_iter(self, dataset):
         sampler = torch.utils.data.distributed.DistributedSampler(
@@ -1234,6 +1234,12 @@ class PipelineEngine(DeepSpeedEngine):
         self.pipe_profiler.setIteration("Load Checkpoint", self.global_steps)
         self.pipe_profiler.stop("Load Checkpoint")
 
+    def _exec_remapping_check(self,):
+        print("_exec_remapping_check")
+
+    def _exec_remapping_procedure(self):
+        print("_exec_remapping_procedure")
+
     # A map of PipeInstruction types to methods. Each method will be executed with the
     # kwargs provided to the PipeInstruction from the scheduler.
     _INSTRUCTION_MAP = {
@@ -1247,6 +1253,8 @@ class PipelineEngine(DeepSpeedEngine):
         schedule.RecvActivation: _exec_recv_activations,
         schedule.SendGrad: _exec_send_grads,
         schedule.RecvGrad: _exec_recv_grads,
+        schedule.RemapCheck: _exec_remapping_check,
+        schedule.RemapExec: _exec_remapping_procedure
     }
 
     def _exec_schedule(self, pipe_schedule):
@@ -1276,8 +1284,6 @@ class PipelineEngine(DeepSpeedEngine):
         self.batch_fn = fn
 
     def remapping_layer(self, from_rank, to_rank):
-
-        print("-------REMAPPINP--------")
         if self.global_rank == from_rank:
             # Sending and Removing computed data
             # inputs -> batch (input and received activations, should exist on the to_rank)
@@ -1293,12 +1299,13 @@ class PipelineEngine(DeepSpeedEngine):
 
             p2p.send(num_micro_batches, to_rank)
             for micro_batch_id in self.module.layerwise_output:
-                tensor = self.module.layerwise_output[micro_batch_id][NUM_MOVING_LAYER-1]
+                tensor = self.module.layerwise_output[micro_batch_id]
                 p2p.send(torch.Tensor([micro_batch_id]).to(
                     self.device), to_rank)
                 p2p.send(torch.Tensor(
                     [tensor.shape[0], tensor.shape[1]]).to(self.device), to_rank)
                 p2p.send(tensor, to_rank)
+                del self.module.layerwise_output[micro_batch_id]
 
             # Send model parameters
             for i in range(NUM_MOVING_LAYER):
