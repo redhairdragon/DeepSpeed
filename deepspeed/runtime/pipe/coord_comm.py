@@ -3,7 +3,7 @@ import torch.distributed as dist
 import boto3
 from datetime import timedelta
 import io
-
+from .constant import REMAPPING_KEY
 # communication class for pipe engine
 # use to determine:
 #   1. remapping is happening or not
@@ -40,7 +40,7 @@ class CoordComm:
         return private_ips[0]
 
     def setStateDict(self, name, state):
-        if state:
+        if state != None:
             buffer = io.BytesIO()
             torch.save(state, buffer)
             buffer.seek(0)
@@ -56,3 +56,10 @@ class CoordComm:
         self.client_store.delete_key(name)
         buffer = io.BytesIO(state_dict_raw)
         return torch.load(buffer)
+
+    def getRemappingStatus(self):
+        self.client_store.wait([REMAPPING_KEY])
+        remapping_state = self.client_store.get(REMAPPING_KEY)
+        if remapping_state == b"1":
+            return True
+        return False

@@ -204,6 +204,8 @@ class TrainSchedule(PipeSchedule):
                 curr_buffer = self._buffer_idx(micro_batch_id)
 
             cmds = []
+
+            # REMAPPING
             cmds.append(RemapCheck())
             cmds.append(RemapExec())
 

@@ -1,1 +1,2 @@
 NUM_MOVING_LAYER = 3
+REMAPPING_KEY = "remapping"

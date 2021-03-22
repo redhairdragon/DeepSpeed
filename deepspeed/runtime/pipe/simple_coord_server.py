@@ -2,12 +2,16 @@ import torch.distributed as dist
 from datetime import timedelta
 
 TCP_STORE_PORT = 8877
-NUM_WORKERS = 100  # TODO make it configurable
+NUM_WORKERS = 2  # TODO make it configurable
+server_store = dist.TCPStore(
+    "0.0.0.0", TCP_STORE_PORT, NUM_WORKERS, True, timedelta(seconds=30)
+)
 
-if __name__ == "__main__":
-    server_store = dist.TCPStore(
-        "0.0.0.0", TCP_STORE_PORT, NUM_WORKERS, True, timedelta(seconds=30)
-    )
-    server_store.set("remapping", "0")
-    while True:
-        pass
+
+def set_remapping():
+    server_store.set("remapping", "1")
+
+
+while True:
+    usr_in = input()
+    set_remapping()

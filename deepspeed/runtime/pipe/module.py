@@ -101,6 +101,7 @@ class PartialPipeModule(nn.Module):
         self.tied_weight_attrs = tied_weight_attrs
 
         self._build(spec)
+        self.computed_result = dict()
 
     def _build(self, specs):
         for local_idx, layer in enumerate(specs[self._local_start: self._local_stop]):
@@ -144,6 +145,11 @@ class PartialPipeModule(nn.Module):
             # that case and just use it in forward()
             else:
                 self.forward_funcs.append(layer)
+
+    def forward(self, in_tensor):
+        for fn in self.forward_funcs:
+            in_tensor = fn(in_tensor)
+        return in_tensor
 
 
 class PipelineModule(nn.Module):
@@ -378,6 +384,7 @@ class PipelineModule(nn.Module):
         # ensure it is preserved in the closure. Otherwise checkpointed forward funcs
         # will see a different offset.
         self.micro_offset += 1
+        print(self.micro_offset)
 
         def exec_range_func(start, end, save_layer_outputs=False):
             """Helper function to be used with checkpoint()
@@ -402,14 +409,16 @@ class PipelineModule(nn.Module):
 
                     inputs = layer(inputs)
 
+                    # REMAPPING
+                    # TODO: include partial module later
                     if save_layer_outputs and self.global_rank == 1 and self.forward_funcs[NUM_MOVING_LAYER-1] is layer:
                         if type(inputs) is tuple:
                             self.layerwise_output[self.curr_fwd_batch] = inputs[0]
                         else:
                             self.layerwise_output[self.curr_fwd_batch] = inputs
-
+                # REMAPPING
                 for partial_mod in self.partial_modules:
-                    pass
+                    inputs = partial_mod.forward(inputs)
 
                 return inputs
 
@@ -691,7 +700,10 @@ class PipelineModule(nn.Module):
         self.partial_modules.append(partialModule)
         self._local_stop += num_layer
 
-    # remove layers from beginning
+    # output: dict (micro_b -> tensor)
+    def save_computed_layer_output(self, output: dict):
+        self.partial_modules[-1] = output
+
     def remove_layers(self, num_layer):
         for _ in range(num_layer):
             self.forward_funcs.pop(0)

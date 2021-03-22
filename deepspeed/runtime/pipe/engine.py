@@ -220,9 +220,9 @@ class PipelineEngine(DeepSpeedEngine):
                 "global_rank": self.global_rank}
         )
         self.coord_com = CoordComm()  # connect to a unique instance named "coord"
-
-        # self.remapping_layer(1, 0)
-        # exit()
+        self.remapping_due = False
+        self.remapping_layer(1, 0)
+        exit()
 
     def _build_data_iter(self, dataset):
         sampler = torch.utils.data.distributed.DistributedSampler(
@@ -625,6 +625,7 @@ class PipelineEngine(DeepSpeedEngine):
         # Reconstruct if we previously partitioned the output. We must be
         # careful to also restore the computational graph of the tensors we partitioned.
         if self.is_pipe_partitioned:
+            print("is_pipe_partitioned")
             if self.is_grad_partitioned:
                 part_output = PartitionedTensor.from_meta(
                     meta=outputs[0],
@@ -645,6 +646,8 @@ class PipelineEngine(DeepSpeedEngine):
 
         grad_tensors = self.grad_layer
         if self.is_grad_partitioned:
+            print("is_grad_partitioned")
+
             # print(f'RANK={self.global_rank} BEFORE-BWD restoring grad={self.grad_layer[0].size()} {self.grad_layer[1].size()}')
             part_grad = PartitionedTensor.from_meta(
                 meta=self.grad_layer[0],
@@ -1234,11 +1237,16 @@ class PipelineEngine(DeepSpeedEngine):
         self.pipe_profiler.setIteration("Load Checkpoint", self.global_steps)
         self.pipe_profiler.stop("Load Checkpoint")
 
+    # REMAPPING
     def _exec_remapping_check(self,):
-        print("_exec_remapping_check")
+        self.remapping_due = self.coord_com.getRemappingStatus()
 
     def _exec_remapping_procedure(self):
-        print("_exec_remapping_procedure")
+        if self.remapping_due:
+            self.remapping_layer(1, 0)
+        else:
+            # donothing here
+            pass
 
     # A map of PipeInstruction types to methods. Each method will be executed with the
     # kwargs provided to the PipeInstruction from the scheduler.
@@ -1253,6 +1261,7 @@ class PipelineEngine(DeepSpeedEngine):
         schedule.RecvActivation: _exec_recv_activations,
         schedule.SendGrad: _exec_send_grads,
         schedule.RecvGrad: _exec_recv_grads,
+        # REMAPPING
         schedule.RemapCheck: _exec_remapping_check,
         schedule.RemapExec: _exec_remapping_procedure
     }
@@ -1283,8 +1292,36 @@ class PipelineEngine(DeepSpeedEngine):
         """
         self.batch_fn = fn
 
+    # REMAPPING
     def remapping_layer(self, from_rank, to_rank):
         if self.global_rank == from_rank:
+
+            # Test
+            # import torch
+            # import torch.nn as nn
+            linear = nn.Linear(4, 5).to(self.device)
+            optimizer = torch.optim.SGD(
+                linear.parameters(), lr=0.1, momentum=0.9)
+            optimizer.zero_grad()
+            x = torch.tensor(
+                [[1, 2, 3, 4.]], requires_grad=True).to(self.device)
+            y = linear(x)
+
+            print(f"rank xx:{from_rank},{y}")
+            self.coord_com.setStateDict('y', y)
+            # p2p.send(y, to_rank)
+
+            self.coord_com.setStateDict("linear", linear.state_dict())
+
+            z = torch.tensor([2, 3, 4, 5., 6],
+                             requires_grad=True).to(self.device)
+            loss = (z-y).sum()/5
+            loss.backward(retain_graph=True)
+            print(f'rank 1 {y.grad}')
+            optimizer.step()
+            print(f"rank: 1, {list(linear.parameters())}")
+
+            exit()
             # Sending and Removing computed data
             # inputs -> batch (input and received activations, should exist on the to_rank)
             # labels -> labels (IGNORED assume NUM_MOVING_LAYER<total layer)
@@ -1316,10 +1353,34 @@ class PipelineEngine(DeepSpeedEngine):
 
             # Removing Model related
             self.module.remove_layers(NUM_MOVING_LAYER)
-            # print(self.module)
             print("REMAPPING SEND DONE")
 
         if self.global_rank == to_rank:
+            # Test
+            linear = nn.Linear(4, 5).to(self.device)
+            optimizer = torch.optim.SGD(
+                linear.parameters(), lr=0.1, momentum=0.9)
+            optimizer.zero_grad()
+
+            y = torch.zeros(1, 5).to(self.device)
+            y = self.coord_com.getStateDict('y')
+
+            state_dict = self.coord_com.getStateDict("linear")
+            linear.load_state_dict(state_dict)
+
+            # p2p.recv(y, from_rank)
+            print(f'rank:{to_rank},{y}')
+
+            z = torch.tensor([2, 3, 4, 5., 6],
+                             requires_grad=True).to(self.device)
+            loss = (z-y).sum()/5
+            loss.backward()
+            print(f"rank: 0, before {list(linear.parameters())}")
+
+            optimizer.step()
+            print(f"rank: 0, {list(linear.parameters())}")
+            exit()
+
             previous_local_stop = self.module._local_stop
             self.module.add_layers(NUM_MOVING_LAYER)
 
@@ -1330,13 +1391,14 @@ class PipelineEngine(DeepSpeedEngine):
             for _ in range(int(num_micro_batches[0])):
                 micro_batch_id = torch.Tensor(1).to(self.device)
                 p2p.recv(micro_batch_id, from_rank)
+                # TODO: can be sent only once
                 shape = torch.Tensor([0, 0]).to(self.device)
                 p2p.recv(shape, from_rank)
-                tmp_tensor = torch.tensor(
-                    [int(shape[0]), int(shape[1])]).to(self.device)
+                tmp_tensor = torch.zeros(
+                    int(shape[0]), int(shape[1])).to(self.device)
                 p2p.recv(tmp_tensor, from_rank)
                 inter_layer_output[int(micro_batch_id[0])] = tmp_tensor
-            self.module.received_layer_output[previous_local_stop] = inter_layer_output
+            self.module.save_computed_layer_output(inter_layer_output)
 
             # Load model param
             for module in list(self.module.partial_modules[-1].named_modules()):
