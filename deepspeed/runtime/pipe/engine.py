@@ -221,8 +221,9 @@ class PipelineEngine(DeepSpeedEngine):
         )
         self.coord_com = CoordComm()  # connect to a unique instance named "coord"
         self.remapping_due = False
-        self.remapping_layer(1, 0)
-        exit()
+        self.buffer_to_mbatch = dict()
+        # self.remapping_layer(1, 0)
+        # exit()
 
     def _build_data_iter(self, dataset):
         sampler = torch.utils.data.distributed.DistributedSampler(
@@ -267,7 +268,8 @@ class PipelineEngine(DeepSpeedEngine):
         """
         if self.num_pipe_buffers >= num_buffers:
             return
-
+        # print(f"num_pipe_buffers:{self.num_pipe_buffers}")
+        # print(f"num_buffers:{num_buffers}")
         num_added = num_buffers - self.num_pipe_buffers
         for key in self.pipe_buffers:
             self.pipe_buffers[key].extend([None] * num_added)
@@ -536,7 +538,7 @@ class PipelineEngine(DeepSpeedEngine):
 
         return batch
 
-    def _exec_forward_pass(self, buffer_id):
+    def _exec_forward_pass(self, buffer_id, partial_module=None):
         self.tput_timer.start()
         self.mem_status("BEFORE FWD", reset_max=True)
 
@@ -567,6 +569,9 @@ class PipelineEngine(DeepSpeedEngine):
 
         self.module.set_batch_id(buffer_id)
         outputs = super().forward(inputs)
+
+        # REMAPPING
+        self.buffer_to_mbatch[buffer_id] = self.module.get_micro_batch_id()
 
         # Partition the outputs if we are not the last stage
         if self.is_pipe_partitioned and not self.is_last_stage():
@@ -611,6 +616,9 @@ class PipelineEngine(DeepSpeedEngine):
         # mechanisms.
         if self.is_last_stage():
             super().backward(self.loss)
+            # REMAPPING
+            self.module.mark_mbatch_backward_finished(
+                self.buffer_to_mbatch[buffer_id])
             self.mem_status("AFTER BWD")
             return
 
@@ -668,11 +676,14 @@ class PipelineEngine(DeepSpeedEngine):
             torch.autograd.backward(
                 tensors=(outputs,), grad_tensors=(grad_tensors,))
 
+        # REMAPPING
+        self.module.mark_mbatch_backward_finished(
+            self.buffer_to_mbatch[buffer_id])
+
         # Free up the memory from the output of forward()
         self.pipe_buffers["output_tensors"][buffer_id] = None
         self.pipe_buffers["outputs"][buffer_id] = None
         grad_tensors = None
-        self.module.delete_layerwise_output(buffer_id)
 
         if self.wall_clock_breakdown():
             self.timers("backward_inner").stop()
@@ -1244,6 +1255,13 @@ class PipelineEngine(DeepSpeedEngine):
     def _exec_remapping_procedure(self):
         if self.remapping_due:
             self.remapping_layer(1, 0)
+            # recompute forward pass on the other machine
+            partial_module = self.module.get_new_partial_module()
+            for micro_batch_id in partial_module.recomp_mbatch_list:
+                assert micro_batch_id in self.buffer_to_mbatch
+                buffer_id = self.buffer_to_mbatch[micro_batch_id]
+                inputs = self.pipe_buffers["outputs"][buffer_id]
+
         else:
             # donothing here
             pass
@@ -1295,33 +1313,6 @@ class PipelineEngine(DeepSpeedEngine):
     # REMAPPING
     def remapping_layer(self, from_rank, to_rank):
         if self.global_rank == from_rank:
-
-            # Test
-            # import torch
-            # import torch.nn as nn
-            linear = nn.Linear(4, 5).to(self.device)
-            optimizer = torch.optim.SGD(
-                linear.parameters(), lr=0.1, momentum=0.9)
-            optimizer.zero_grad()
-            x = torch.tensor(
-                [[1, 2, 3, 4.]], requires_grad=True).to(self.device)
-            y = linear(x)
-
-            print(f"rank xx:{from_rank},{y}")
-            self.coord_com.setStateDict('y', y)
-            # p2p.send(y, to_rank)
-
-            self.coord_com.setStateDict("linear", linear.state_dict())
-
-            z = torch.tensor([2, 3, 4, 5., 6],
-                             requires_grad=True).to(self.device)
-            loss = (z-y).sum()/5
-            loss.backward(retain_graph=True)
-            print(f'rank 1 {y.grad}')
-            optimizer.step()
-            print(f"rank: 1, {list(linear.parameters())}")
-
-            exit()
             # Sending and Removing computed data
             # inputs -> batch (input and received activations, should exist on the to_rank)
             # labels -> labels (IGNORED assume NUM_MOVING_LAYER<total layer)
@@ -1331,18 +1322,13 @@ class PipelineEngine(DeepSpeedEngine):
             # Send out layer output, conceptually only the n th layer is required
             #   first send number of micro-batches computed
             num_micro_batches = torch.Tensor(
-                [len(self.module.layerwise_output)]
+                [len(self.module.get_recompute_mbatch_list())]
             ).to(self.device)
 
             p2p.send(num_micro_batches, to_rank)
-            for micro_batch_id in self.module.layerwise_output:
-                tensor = self.module.layerwise_output[micro_batch_id]
-                p2p.send(torch.Tensor([micro_batch_id]).to(
-                    self.device), to_rank)
-                p2p.send(torch.Tensor(
-                    [tensor.shape[0], tensor.shape[1]]).to(self.device), to_rank)
-                p2p.send(tensor, to_rank)
-                del self.module.layerwise_output[micro_batch_id]
+            recomp_list = torch.Tensor(
+                list(self.module.get_recompute_mbatch_list())).to(self.device)
+            p2p.send(recomp_list, to_rank)
 
             # Send model parameters
             for i in range(NUM_MOVING_LAYER):
@@ -1356,49 +1342,18 @@ class PipelineEngine(DeepSpeedEngine):
             print("REMAPPING SEND DONE")
 
         if self.global_rank == to_rank:
-            # Test
-            linear = nn.Linear(4, 5).to(self.device)
-            optimizer = torch.optim.SGD(
-                linear.parameters(), lr=0.1, momentum=0.9)
-            optimizer.zero_grad()
-
-            y = torch.zeros(1, 5).to(self.device)
-            y = self.coord_com.getStateDict('y')
-
-            state_dict = self.coord_com.getStateDict("linear")
-            linear.load_state_dict(state_dict)
-
-            # p2p.recv(y, from_rank)
-            print(f'rank:{to_rank},{y}')
-
-            z = torch.tensor([2, 3, 4, 5., 6],
-                             requires_grad=True).to(self.device)
-            loss = (z-y).sum()/5
-            loss.backward()
-            print(f"rank: 0, before {list(linear.parameters())}")
-
-            optimizer.step()
-            print(f"rank: 0, {list(linear.parameters())}")
-            exit()
-
             previous_local_stop = self.module._local_stop
             self.module.add_layers(NUM_MOVING_LAYER)
 
             # Number of computed micro-batches
             num_micro_batches = torch.Tensor(1).to(self.device)
             p2p.recv(num_micro_batches, from_rank)
-            inter_layer_output = dict()
-            for _ in range(int(num_micro_batches[0])):
-                micro_batch_id = torch.Tensor(1).to(self.device)
-                p2p.recv(micro_batch_id, from_rank)
-                # TODO: can be sent only once
-                shape = torch.Tensor([0, 0]).to(self.device)
-                p2p.recv(shape, from_rank)
-                tmp_tensor = torch.zeros(
-                    int(shape[0]), int(shape[1])).to(self.device)
-                p2p.recv(tmp_tensor, from_rank)
-                inter_layer_output[int(micro_batch_id[0])] = tmp_tensor
-            self.module.save_computed_layer_output(inter_layer_output)
+            recompute_mbatch_list = torch.Tensor(
+                int(num_micro_batches[0])).to(self.device)
+            p2p.recv(recompute_mbatch_list, from_rank)
+
+            for micro_batch_id in recompute_mbatch_list:
+                self.module.add_recompute_mbatch_id(int(micro_batch_id[0]))
 
             # Load model param
             for module in list(self.module.partial_modules[-1].named_modules()):

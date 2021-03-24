@@ -90,6 +90,8 @@ class TiedLayerSpec(LayerSpec):
         self.forward_fn = forward_fn
         self.tied_weight_attr = tied_weight_attr
 
+# REMAPPING
+
 
 class PartialPipeModule(nn.Module):
     def __init__(self, spec, start, stop, tied_module, tied_weight_attrs) -> None:
@@ -101,7 +103,7 @@ class PartialPipeModule(nn.Module):
         self.tied_weight_attrs = tied_weight_attrs
 
         self._build(spec)
-        self.computed_result = dict()
+        self.recomp_mbatch_list = set()
 
     def _build(self, specs):
         for local_idx, layer in enumerate(specs[self._local_start: self._local_stop]):
@@ -146,10 +148,36 @@ class PartialPipeModule(nn.Module):
             else:
                 self.forward_funcs.append(layer)
 
-    def forward(self, in_tensor):
-        for fn in self.forward_funcs:
-            in_tensor = fn(in_tensor)
-        return in_tensor
+    def forward(self, in_tensor, micro_offset):
+        def exec_range_func():
+            """Helper function to be used with checkpoint()
+            Adapted from torch.utils.checkpoint:checkpoint_sequential()
+            """
+            local_micro_offset = micro_offset + 1
+
+            def exec_func(*inputs):
+                # Single tensor inputs need to be unwrapped
+                if len(inputs) == 1:
+                    inputs = inputs[0]
+                for idx, layer in enumerate(self.forward_funcs):
+                    self.curr_layer = idx + self._local_start
+                    if self.seed_layers:
+                        new_seed = (
+                            self.base_seed * local_micro_offset
+                        ) + self.curr_layer
+                        if self.seed_fn:
+                            self.seed_fn(new_seed)
+                        else:
+                            ds_utils.set_random_seed(new_seed)
+
+                    inputs = layer(inputs)
+                    return inputs
+
+            return exec_func
+        if not isinstance(in_tensor, tuple):
+            x = (in_tensor,)
+        x = exec_range_func()(in_tensor)
+        return x
 
 
 class PipelineModule(nn.Module):
@@ -268,15 +296,15 @@ class PipelineModule(nn.Module):
         self.activation_checkpoint_interval = activation_checkpoint_interval
         self.activation_checkpoint_func = activation_checkpoint_func
 
-        # save layer output here
-        # microbatch -> [list() for _ in range(len(self.forward_funcs))]
-        self.layerwise_output = dict()
+        self.curr_fwd_batch = -1
 
+        # REMAPPING
         # save received layer output here
         # microbatch -> recv layer output
-        self.received_layer_output = dict()
+        # self.received_layer_output = dict()
         self.partial_modules = list()
-        self.curr_fwd_batch = -1
+        # input of this partition that haven't finished backward yet
+        self.unfinished_inputs = dict()
 
     def _build(self):
         specs = self._layer_specs
@@ -375,16 +403,13 @@ class PipelineModule(nn.Module):
             )
         return idxs
 
-    def delete_layerwise_output(self, batch_id):
-        if batch_id in self.layerwise_output:
-            del self.layerwise_output[batch_id]
-
     def forward(self, forward_input):
         # We need to offset the seed by the microbatch ID. Save it in a local var to
         # ensure it is preserved in the closure. Otherwise checkpointed forward funcs
         # will see a different offset.
         self.micro_offset += 1
-        print(self.micro_offset)
+        print(len(self.unfinished_inputs))
+        self.unfinished_inputs[self.micro_offset] = forward_input
 
         def exec_range_func(start, end, save_layer_outputs=False):
             """Helper function to be used with checkpoint()
@@ -409,13 +434,6 @@ class PipelineModule(nn.Module):
 
                     inputs = layer(inputs)
 
-                    # REMAPPING
-                    # TODO: include partial module later
-                    if save_layer_outputs and self.global_rank == 1 and self.forward_funcs[NUM_MOVING_LAYER-1] is layer:
-                        if type(inputs) is tuple:
-                            self.layerwise_output[self.curr_fwd_batch] = inputs[0]
-                        else:
-                            self.layerwise_output[self.curr_fwd_batch] = inputs
                 # REMAPPING
                 for partial_mod in self.partial_modules:
                     inputs = partial_mod.forward(inputs)
@@ -692,6 +710,7 @@ class PipelineModule(nn.Module):
                   for f in funcs if isinstance(f, torch.nn.Module)]
         return any(len(list(p)) > 0 for p in params)
 
+    # REMAPPING
     # add layer to the end of stage
     def add_layers(self, num_layer):
         # append layer spec
@@ -699,10 +718,6 @@ class PipelineModule(nn.Module):
                                           self.tied_modules, self.tied_weight_attrs)
         self.partial_modules.append(partialModule)
         self._local_stop += num_layer
-
-    # output: dict (micro_b -> tensor)
-    def save_computed_layer_output(self, output: dict):
-        self.partial_modules[-1] = output
 
     def remove_layers(self, num_layer):
         for _ in range(num_layer):
@@ -728,3 +743,19 @@ class PipelineModule(nn.Module):
 
     def set_batch_id(self, batch_id):
         self.curr_fwd_batch = batch_id
+
+    def get_micro_batch_id(self):
+        return self.micro_offset
+
+    def add_recompute_mbatch_id(self, mbid):
+        self.partial_modules[-1].recomp_mbatch_list.add(mbid)
+
+    def get_new_partial_module(self):
+        return self.partial_modules[-1]
+
+    def get_recompute_mbatch_list(self):
+        return self.unfinished_inputs.keys()
+
+    def mark_mbatch_backward_finished(self, mbatch):
+        print(f"{self.global_rank}:{self.unfinished_inputs.keys()}")
+        del self.unfinished_inputs[mbatch]
