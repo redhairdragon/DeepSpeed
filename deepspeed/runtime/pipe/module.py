@@ -408,7 +408,7 @@ class PipelineModule(nn.Module):
         # ensure it is preserved in the closure. Otherwise checkpointed forward funcs
         # will see a different offset.
         self.micro_offset += 1
-        print(len(self.unfinished_inputs))
+        # print(len(self.unfinished_inputs))
         self.unfinished_inputs[self.micro_offset] = forward_input
 
         def exec_range_func(start, end, save_layer_outputs=False):
@@ -757,5 +757,5 @@ class PipelineModule(nn.Module):
         return self.unfinished_inputs.keys()
 
     def mark_mbatch_backward_finished(self, mbatch):
-        print(f"{self.global_rank}:{self.unfinished_inputs.keys()}")
+        # print(f"{self.global_rank}:{self.unfinished_inputs.keys()}")
         del self.unfinished_inputs[mbatch]

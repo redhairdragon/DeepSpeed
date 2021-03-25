@@ -60,6 +60,10 @@ class CoordComm:
     def getRemappingStatus(self):
         self.client_store.wait([REMAPPING_KEY])
         remapping_state = self.client_store.get(REMAPPING_KEY)
+        # print(f"remapping_state:{remapping_state}")
         if remapping_state == b"1":
             return True
         return False
+
+    def done(self):
+        self.client_store.add("remapping_done_count", 1)

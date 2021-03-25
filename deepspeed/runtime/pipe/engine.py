@@ -1254,17 +1254,20 @@ class PipelineEngine(DeepSpeedEngine):
 
     def _exec_remapping_procedure(self):
         if self.remapping_due:
+            print("Remapping happens")
             self.remapping_layer(1, 0)
-            # recompute forward pass on the other machine
-            partial_module = self.module.get_new_partial_module()
-            for micro_batch_id in partial_module.recomp_mbatch_list:
-                assert micro_batch_id in self.buffer_to_mbatch
-                buffer_id = self.buffer_to_mbatch[micro_batch_id]
-                inputs = self.pipe_buffers["outputs"][buffer_id]
-
+            if self.global_rank == 0:
+                # recompute forward pass on the other machine
+                partial_module = self.module.get_new_partial_module()
+                for micro_batch_id in partial_module.recomp_mbatch_list:
+                    assert micro_batch_id in self.buffer_to_mbatch
+                    buffer_id = self.buffer_to_mbatch[micro_batch_id]
+                    inputs = self.pipe_buffers["outputs"][buffer_id]
+                    partial_module.forward(inputs)
+                self.coord_com.done()
         else:
             # donothing here
-            pass
+            print("No Remapping ")
 
     # A map of PipeInstruction types to methods. Each method will be executed with the
     # kwargs provided to the PipeInstruction from the scheduler.
