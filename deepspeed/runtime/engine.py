@@ -913,6 +913,7 @@ class DeepSpeedEngine(Module):
             self.optimizer.is_gradient_accumulation_boundary = self.is_gradient_accumulation_boundary(
             )
             self.optimizer.backward(loss)
+            print("backward: zero_optimization")
         elif self.amp_enabled():
             # AMP requires delaying unscale when inside gradient accumulation boundaries
             # https://nvidia.github.io/apex/advanced.html#gradient-accumulation-across-iterations
@@ -920,10 +921,14 @@ class DeepSpeedEngine(Module):
             with amp.scale_loss(loss,
                                 self.optimizer,
                                 delay_unscale=delay_unscale) as scaled_loss:
+                print("backward: amp_enabled")
                 scaled_loss.backward()
+
         elif self.fp16_enabled():
+            print("backward: fp16_enabled")
             self.optimizer.backward(loss)
         else:
+            print("backward: normal")
             loss.backward()
 
         if self.wall_clock_breakdown():

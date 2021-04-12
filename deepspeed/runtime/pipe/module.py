@@ -6,7 +6,7 @@ import re as regex
 
 from collections import defaultdict
 from functools import partial
-from typing import OrderedDict
+from torch.autograd import Variable
 
 import torch
 import torch.nn as nn
@@ -101,7 +101,7 @@ class PartialPipeModule(nn.Module):
         self._local_stop = stop
         self.tied_module = tied_module
         self.tied_weight_attrs = tied_weight_attrs
-
+        self.seed_layers = False
         self._build(spec)
         self.recomp_mbatch_list = set()
 
@@ -161,14 +161,14 @@ class PartialPipeModule(nn.Module):
                     inputs = inputs[0]
                 for idx, layer in enumerate(self.forward_funcs):
                     self.curr_layer = idx + self._local_start
-                    if self.seed_layers:
-                        new_seed = (
-                            self.base_seed * local_micro_offset
-                        ) + self.curr_layer
-                        if self.seed_fn:
-                            self.seed_fn(new_seed)
-                        else:
-                            ds_utils.set_random_seed(new_seed)
+                    # if self.seed_layers:
+                    #     new_seed = (
+                    #         self.base_seed * local_micro_offset
+                    #     ) + self.curr_layer
+                    #     if self.seed_fn:
+                    #         self.seed_fn(new_seed)
+                    #     else:
+                    #         ds_utils.set_random_seed(new_seed)
 
                     inputs = layer(inputs)
                     return inputs
@@ -434,9 +434,23 @@ class PipelineModule(nn.Module):
 
                     inputs = layer(inputs)
 
+                    # if save_layer_outputs and self.global_rank != 0:
+                    #     if type(inputs) is tuple:
+                    #         input_tensor = inputs[0].detach_()
+                    #         input_tensor = Variable(
+                    #             input_tensor.data, requires_grad=True)
+                    #         inputs = (input_tensor, inputs[1])
+
+                    #     else:
+                    #         inputs.detach_()
+                    #         inputs = Variable(
+                    #             inputs.data, requires_grad=True)
+                    #     self.layerwise_output[self.curr_fwd_batch].append(
+                    #         inputs)
+
                 # REMAPPING
                 for partial_mod in self.partial_modules:
-                    inputs = partial_mod.forward(inputs)
+                    inputs = partial_mod.forward(inputs, self.micro_offset)
 
                 return inputs
 
@@ -723,13 +737,13 @@ class PipelineModule(nn.Module):
         for _ in range(num_layer):
             self.forward_funcs.pop(0)
 
-        layer_names = list(self._modules.keys())
-        for n in layer_names:
-            if (
-                n.isdigit()
-                and self._local_start <= int(n) < self._local_start + num_layer
-            ):
-                del self._modules[n]
+        # layer_names = list(self._modules.keys())
+        # for n in layer_names:
+        #     if (
+        #         n.isdigit()
+        #         and self._local_start <= int(n) < self._local_start + num_layer
+        #     ):
+        #         del self._modules[n]
 
         self._local_start -= num_layer
 

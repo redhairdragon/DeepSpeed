@@ -3,7 +3,7 @@ import torch.distributed as dist
 import boto3
 from datetime import timedelta
 import io
-from .constant import REMAPPING_KEY
+from .constant import *
 # communication class for pipe engine
 # use to determine:
 #   1. remapping is happening or not
@@ -66,4 +66,4 @@ class CoordComm:
         return False
 
     def done(self):
-        self.client_store.add("remapping_done_count", 1)
+        self.client_store.add(REMAPPING_COUNT, 1)

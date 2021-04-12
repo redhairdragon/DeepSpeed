@@ -20,6 +20,7 @@ class FP16_Optimizer(object):
 
    For usage example please see, TODO:  DeepSpeed V2 Tutorial
     """
+
     def __init__(self,
                  init_optimizer,
                  static_loss_scale=1.0,
@@ -96,7 +97,7 @@ class FP16_Optimizer(object):
         else:
             self.clip_grad_norm = torch.nn.utils.clip_grad_norm_
 
-        #model parallel object
+        # model parallel object
         self.mpu = mpu
 
         self.overflow = False
@@ -145,7 +146,8 @@ class FP16_Optimizer(object):
                                 device=p.device) if p.grad is None else p.grad
                     for p in group
                 ]))
-            norm_groups.append(get_weight_norm(grads_groups_flat[i], mpu=self.mpu))
+            norm_groups.append(get_weight_norm(
+                grads_groups_flat[i], mpu=self.mpu))
 
         self.overflow = self.overflow_checker.check_using_norm(norm_groups)
         prev_scale = self.cur_scale
@@ -202,7 +204,8 @@ class FP16_Optimizer(object):
         UNSCALE_AND_CLIP = 'unscale_and_clip'
         BASIC_STEP = 'basic_step'
         UPDATE_FP16 = 'update_fp16'
-        STEP_TIMERS = OVERFLOW_TIMERS + [UNSCALE_AND_CLIP, BASIC_STEP, UPDATE_FP16]
+        STEP_TIMERS = OVERFLOW_TIMERS + \
+            [UNSCALE_AND_CLIP, BASIC_STEP, UPDATE_FP16]
 
         # First determine if there is overflow.
         self.start_timers([OVERFLOW_CHECK])
@@ -256,7 +259,7 @@ class FP16_Optimizer(object):
         self.optimizer.step()
         self.stop_timers([BASIC_STEP])
 
-        #get rid of the fp32 gradients. Not needed anymore
+        # get rid of the fp32 gradients. Not needed anymore
         for group in self.fp32_groups_flat:
             group.grad = None
 
@@ -311,7 +314,8 @@ class FP16_Optimizer(object):
                                      self.min_loss_scale)
                 self.last_overflow_iter = self.cur_iter
                 if self.verbose:
-                    logger.info(f"\nGrad overflow on iteration {self.cur_iter}")
+                    logger.info(
+                        f"\nGrad overflow on iteration {self.cur_iter}")
                     logger.info(
                         f"Reducing dynamic loss scale from {prev_scale} to {self.cur_scale}"
                     )

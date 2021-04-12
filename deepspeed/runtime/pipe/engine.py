@@ -219,9 +219,12 @@ class PipelineEngine(DeepSpeedEngine):
             {"micro_batch_size": self.micro_batch_size,
                 "global_rank": self.global_rank}
         )
+        # REMAPPING
         self.coord_com = CoordComm()  # connect to a unique instance named "coord"
         self.remapping_due = False
         self.buffer_to_mbatch = dict()
+
+        # uncomment these to test remapping function during init
         # self.remapping_layer(1, 0)
         # exit()
 
@@ -539,6 +542,7 @@ class PipelineEngine(DeepSpeedEngine):
         return batch
 
     def _exec_forward_pass(self, buffer_id, partial_module=None):
+
         self.tput_timer.start()
         self.mem_status("BEFORE FWD", reset_max=True)
 
@@ -665,7 +669,6 @@ class PipelineEngine(DeepSpeedEngine):
             grad_tensors = tuple([part_grad.full(), self.grad_layer[2]])
             part_grad = None
             # print(f'RANK={self.global_rank} BEFORE-BWD restored grad={self.grad_layer[0].size()} {self.grad_layer[1].size()}')
-
         # This handles either a single tensor or tuple of tensors.
         if isinstance(outputs, tuple):
             out_tensors = [t for t in outputs if t.is_floating_point()]
