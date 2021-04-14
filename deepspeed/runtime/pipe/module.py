@@ -737,6 +737,7 @@ class PipelineModule(nn.Module):
         for _ in range(num_layer):
             self.forward_funcs.pop(0)
 
+        # Should delete parameters of transferred layers
         # layer_names = list(self._modules.keys())
         # for n in layer_names:
         #     if (

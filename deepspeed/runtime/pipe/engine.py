@@ -1319,12 +1319,6 @@ class PipelineEngine(DeepSpeedEngine):
     # REMAPPING
     def remapping_layer(self, from_rank, to_rank):
         if self.global_rank == from_rank:
-            # Sending and Removing computed data
-            # inputs -> batch (input and received activations, should exist on the to_rank)
-            # labels -> labels (IGNORED assume NUM_MOVING_LAYER<total layer)
-            # outputs -> activations (IGNORED assume NUM_MOVING_LAYER<total layer)
-            # output_tensors -> tensor object to preserve backward graph (IGNORED assume NUM_MOVING_LAYER<total layer)
-
             # Send out layer output, conceptually only the n th layer is required
             #   first send number of micro-batches computed
             num_micro_batches = torch.Tensor(
